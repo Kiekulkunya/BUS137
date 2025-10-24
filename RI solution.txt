@@ -1,0 +1,3461 @@
+"use client"
+
+import React, { useMemo, useState, useEffect, createContext, useContext } from "react"
+import {
+  AlertTriangle,
+  ChevronDown,
+  Inbox,
+  ListChecks,
+  Info,
+  Shield,
+  TrendingUp,
+  CheckCircle,
+  ArrowRight,
+  Clipboard,
+  Calculator,
+  KeyRound,
+  BookCheck,
+} from "lucide-react"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+} from "chart.js"
+import { Bar, Line } from "react-chartjs-2"
+
+// Register Chart.js components
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend)
+
+// --- Data and Utility Functions for KPIs (Integrated) ---
+
+// Data (from utils/data.js)
+const pillarScores = {
+  CREDITX: { Fairness: 82, Reliability: 91, Privacy: 85, Transparency: 88, Compliance: 94, Sustainability: 78 },
+  SERVEBOT: { Fairness: 75, Reliability: 88, Privacy: 79, Transparency: 82, Compliance: 89, Sustainability: 85 },
+  "ESG-LENS": { Fairness: 90, Reliability: 95, Privacy: 92, Transparency: 91, Compliance: 96, Sustainability: 94 },
+}
+
+const initialConfig = {
+  targetComposite: 87,
+  weights: { Fairness: 20, Reliability: 20, Privacy: 20, Transparency: 15, Compliance: 15, Sustainability: 10 },
+  bands: {
+    composite: { green: 87, amber: 70 },
+    pillar: { green: 85, amber: 70 },
+    // Lower is better bands
+    incidents: { green: 0, amber: 1 },
+    mttd: { green: 30, amber: 50 },
+    mttr: { green: 120, amber: 180 },
+    fairnessGap: { green: 5, amber: 7 },
+    hallucination: { green: 5, amber: 8 },
+    complaintSLA: { green: 16, amber: 24 },
+    energy: { green: 2.5, amber: 3.0 },
+    // Higher is better bands
+    cardsPass: { green: 90, amber: 80 },
+    custTrust: { green: 85, amber: 75 },
+    // Bands for Session 4 (5 shades) - Ensure thresholds align with get5Shade logic
+    alertComposite: { green: 87, lime: 82, amber: 75, orange: 70 }, // Higher is better
+    alertIncidents: { green: 0, lime: 1, amber: 2, orange: 3 }, // lower better
+    alertMttd: { green: 30, lime: 40, amber: 50, orange: 60 }, // lower better
+    alertMttr: { green: 120, lime: 160, amber: 200, orange: 240 }, // lower better
+    alertFairness: { green: 5, lime: 6, amber: 7, orange: 8 }, // lower better
+    alertPolicy: { green: 5, lime: 6.5, amber: 8, orange: 10 }, // lower better
+    alertCustTrust: { green: 85, lime: 80, amber: 75, orange: 70 }, // higher better
+    alertSLA: { green: 16, lime: 20, amber: 24, orange: 30 }, // lower better
+    alertEnergy: { green: 2.5, lime: 2.8, amber: 3.0, orange: 3.5 }, // lower better
+  },
+}
+
+const initialKPIs = {
+  criticalIncidents: 0,
+  mttdMinutes: 21,
+  mttrMinutes: 94,
+  fairnessGapPct: 3.8,
+  hallucinationRatePer1k: 4.2,
+  modelCardsRedTeamPassPct: 92,
+  customerTrustIndex: 86,
+  complaintSLAhrsP90: 14,
+  energyKgPer1kInferences: 2.4,
+}
+
+// Calculations (from utils/calculations.js)
+function bandClass(value, greenThresh, amberThresh, higherIsBetter) {
+  if (value === undefined || value === null || isNaN(value)) return "red"
+  if (higherIsBetter) {
+    if (value >= greenThresh) return "green"
+    if (value >= amberThresh) return "amber"
+    return "red"
+  } else {
+    if (value <= greenThresh) return "green"
+    if (value <= amberThresh) return "amber"
+    return "red"
+  }
+}
+function get5Shade(value, thresholds, higherIsBetter) {
+  if (value === undefined || value === null || isNaN(value) || !thresholds) return "red"
+  if (higherIsBetter) {
+    if (value >= thresholds.green) return "green"
+    if (value >= thresholds.lime) return "lime"
+    if (value >= thresholds.amber) return "amber"
+    if (value >= thresholds.orange) return "orange"
+    return "red"
+  } else {
+    if (value <= thresholds.green) return "green"
+    if (value <= thresholds.lime) return "lime"
+    if (value <= thresholds.amber) return "amber"
+    if (value <= thresholds.orange) return "orange"
+    return "red"
+  }
+}
+function getShadeColors(shade) {
+  switch (shade) {
+    case "green":
+      return { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-300" }
+    case "lime":
+      return { bg: "bg-lime-500/10", border: "border-lime-500/30", text: "text-lime-300" }
+    case "amber":
+      return { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-300" }
+    case "orange":
+      return { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-300" }
+    case "red":
+      return { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-300" }
+    default:
+      return { bg: "bg-gray-500/10", border: "border-gray-500/30", text: "text-gray-300" }
+  }
+}
+
+function computeComposite(pillars, weights) {
+  let composite = 0
+  if (!pillars || !weights) return 0
+  Object.keys(pillars).forEach((key) => {
+    composite += ((weights[key] || 0) / 100) * (pillars[key] || 0)
+  })
+  return Math.round(composite)
+}
+
+function currentPillarAverages(productFilter) {
+  const products = productFilter === "ALL" ? Object.keys(pillarScores) : [productFilter]
+  const averages = {}
+  const pillars = ["Fairness", "Reliability", "Privacy", "Transparency", "Compliance", "Sustainability"]
+
+  pillars.forEach((pillar) => {
+    let sum = 0
+    let count = 0
+    products.forEach((prod) => {
+      if (pillarScores[prod] && pillarScores[prod][pillar] !== undefined) {
+        sum += pillarScores[prod][pillar]
+        count++
+      }
+    })
+    averages[pillar] = count > 0 ? Math.round(sum / count) : 0
+  })
+  return averages
+}
+
+// --- Data Context for KPIs ---
+const DataContext = createContext(undefined)
+
+function DataProvider({ children }) {
+  const [config, setConfig] = useState(() => JSON.parse(JSON.stringify(initialConfig)))
+  const [leaderKPIs, setLeaderKPIs] = useState(() => JSON.parse(JSON.stringify(initialKPIs)))
+
+  const updateConfig = (newConfig) => {
+    setConfig((prev) => ({ ...prev, ...newConfig }))
+  }
+  const updateLeaderKPIs = (newKPIs) => {
+    setLeaderKPIs((prev) => ({ ...prev, ...newKPIs }))
+  }
+  const updateWeights = (newWeights) => {
+    setConfig((prev) => ({ ...prev, weights: newWeights }))
+  }
+
+  return (
+    <DataContext.Provider value={{ config, leaderKPIs, updateConfig, updateLeaderKPIs, updateWeights }}>
+      {children}
+    </DataContext.Provider>
+  )
+}
+function useData() {
+  const context = useContext(DataContext)
+  if (!context) {
+    throw new Error("useData must be used within DataProvider")
+  }
+  return context
+}
+
+// --- Reusable UI Components ---
+
+const AcknowledgmentModal = ({ isOpen, onAgree }) => {
+  const [isChecked, setIsChecked] = React.useState(false)
+  if (!isOpen) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-w-2xl w-full m-4 p-6 md:p-8 transform transition-all">
+        <h2 className="text-xl md:text-2xl font-bold mb-4 flex items-center gap-3 text-blue-400">
+          <AlertTriangle className="text-yellow-400" />
+          Acknowledgment — Educational Purposes
+        </h2>
+        <div className="bg-black/40 border border-gray-800 rounded-lg p-4 max-h-[40vh] overflow-y-auto text-gray-300 text-sm leading-relaxed">
+          <p>
+            Dashboard, analytics, and visualizations are for educational purposes, illustrating AI trust-risk
+            assessment. Data is synthetic, not real-world.
+          </p>
+          <br />
+          <p>
+            Use responsibly. Adapt methods and controls to your organization's policies, legal needs, and risk appetite
+            before presenting results.
+          </p>
+        </div>
+        <div className="mt-6">
+          <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-800/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={(e) => setIsChecked(e.target.checked)}
+              className="w-5 h-5 accent-blue-500 shrink-0"
+            />
+            <span className="text-gray-300 text-sm">I have read and agree with the acknowledgment above.</span>
+          </label>
+        </div>
+        <div className="mt-6">
+          <button
+            onClick={onAgree}
+            disabled={!isChecked}
+            className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed disabled:text-gray-500 text-white font-bold py-3 rounded-lg transition-all duration-300 shadow-lg hover:shadow-blue-500/30 disabled:shadow-none"
+          >
+            Agree & Continue
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const StatusCheck = ({ label, isComplete }) => (
+  <div className="flex items-center justify-between p-3 bg-gray-900/70 rounded-md border border-gray-700/50">
+    <span className="text-sm text-gray-400">{label}</span>
+    {isComplete ? (
+      <CheckCircle size={20} className="text-green-500" />
+    ) : (
+      <div className="w-5 h-5 rounded-full border-2 border-dashed border-gray-600" />
+    )}
+  </div>
+)
+
+// --- Welcome / Configuration Screen ---
+
+const WelcomeScreen = ({ onEnter }) => {
+  const [localApiMode, setLocalApiMode] = React.useState("")
+  const [localApiKey, setLocalApiKey] = React.useState("")
+  const [modalAgreed, setModalAgreed] = React.useState(false)
+  const isApiKeyRequired = localApiMode === "openai" || localApiMode === "gemini"
+  const canProceed = modalAgreed && localApiMode && (isApiKeyRequired ? localApiKey.trim() !== "" : true)
+
+  return (
+    <>
+      <AcknowledgmentModal isOpen={!modalAgreed} onAgree={() => setModalAgreed(true)} />
+      <div
+        className={`min-h-screen bg-black text-gray-200 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 transition-opacity duration-500 ${modalAgreed ? "opacity-100" : "opacity-20 pointer-events-none"}`}
+      >
+        <div className="max-w-4xl w-full">
+          <div className="text-center mb-10">
+            <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-blue-500">
+              Nex-Gen RI Intelligence
+            </h1>
+            <p className="text-gray-400 mt-4 text-lg">Move Smart. Build to Last. Trust by Design.</p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+            <div className="lg:col-span-3 flex flex-col gap-6">
+              <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+                <label htmlFor="api-mode-select" className="block font-semibold text-lg mb-4 text-gray-100">
+                  Step 1: Choose Analysis Engine
+                </label>
+                <div className="relative">
+                  <select
+                    id="api-mode-select"
+                    value={localApiMode}
+                    onChange={(e) => setLocalApiMode(e.target.value)}
+                    className="w-full appearance-none bg-gray-800/50 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-indigo-500 pr-10"
+                  >
+                    <option value="" disabled>
+                      Select...
+                    </option>
+                    <option value="openai">OpenAI API</option>
+                    <option value="gemini">Gemini API</option>
+                    <option value="mockup">Mockup Mode</option>
+                  </select>
+                  <ChevronDown
+                    size={20}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+                  />
+                </div>
+              </div>
+              <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+                <label htmlFor="api-key-input" className="block font-semibold text-lg mb-4 text-gray-100">
+                  Step 2: Enter API Key
+                </label>
+                <div className="relative">
+                  <KeyRound
+                    size={18}
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 ${isApiKeyRequired ? "text-gray-400" : "text-gray-600"}`}
+                  />
+                  <input
+                    id="api-key-input"
+                    type="password"
+                    value={localApiKey}
+                    onChange={(e) => setLocalApiKey(e.target.value)}
+                    placeholder={isApiKeyRequired ? "sk-..." : "No API key needed"}
+                    disabled={!isApiKeyRequired}
+                    className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-indigo-500 pl-10 disabled:bg-gray-800/30 disabled:placeholder-gray-600"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-3">Key is not stored & lost on refresh.</p>
+              </div>
+            </div>
+            <div className="lg:col-span-2 bg-gray-900 rounded-xl p-6 border border-gray-800 flex flex-col">
+              <h3 className="font-semibold text-lg mb-6 text-gray-100">Status</h3>
+              <div className="space-y-4 mb-6">
+                <StatusCheck label="Acknowledgment Agreed" isComplete={modalAgreed} />
+                <StatusCheck label="Engine Selected" isComplete={!!localApiMode} />
+                <StatusCheck label="API Key Provided" isComplete={!isApiKeyRequired || localApiKey.trim() !== ""} />
+              </div>
+              <div className="mt-auto">
+                <button
+                  onClick={() => onEnter(localApiMode, localApiKey)}
+                  disabled={!canProceed}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed disabled:text-gray-500 text-white font-bold py-3 rounded-lg transition-all duration-300 text-base shadow-lg hover:shadow-blue-500/30 disabled:shadow-none"
+                >
+                  <span>{canProceed ? "Enter Dashboard" : "Complete Setup"}</span>
+                  <ArrowRight size={20} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// --- Sidebar Component ---
+const Sidebar = ({ activeTab, setActiveTab }) => {
+  const navItems = [
+    { id: "classifier", label: "TRUST Classifier", icon: Shield },
+    { id: "evaluation", label: "Spam Detection & Eval", icon: BookCheck },
+    { id: "calculator", label: "Nines & 10x Cost Multiplier", icon: Calculator },
+    { id: "kpis", label: "Lasting KPIs", icon: TrendingUp },
+  ]
+
+  return (
+    <div className="w-full bg-gray-900 border-b border-gray-800">
+      <div className="flex items-center justify-between px-6 py-4">
+        {/* CHANGE: Updated title from "Nex-Gen RI Intel" to "Nex-Gen RI Solution prototype" */}
+        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-blue-500">
+          Nex-Gen RI Solution prototype
+        </h1>
+        <nav className="flex gap-2">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                activeTab === item.id
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20"
+                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
+              }`}
+            >
+              <item.icon size={18} />
+              <span className="hidden md:inline">{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="text-xs text-gray-600">
+          <p>&copy; {new Date().getFullYear()} RI Intel Corp.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Helper button for pasting ---
+const PasteButton = ({ onClick }) => (
+  <button
+    onClick={onClick}
+    className="absolute top-3 right-3 flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-medium rounded-lg transition-colors z-10"
+  >
+    <Clipboard size={14} />
+    Paste
+  </button>
+)
+
+// --- Simple Table Component ---
+const SimpleTable = ({ headers, data = [] }) => (
+  <div className="overflow-x-auto max-w-full">
+    <table className="w-full text-sm text-left table-auto">
+      <thead className="bg-gray-700/50 sticky top-0 z-10">
+        <tr>
+          {headers.map((h) => (
+            <th key={h} className="p-2 font-semibold whitespace-nowrap">
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {!Array.isArray(data) || data.length === 0 ? (
+          <tr>
+            <td colSpan={headers.length} className="p-4 text-center text-gray-500">
+              No data yet
+            </td>
+          </tr>
+        ) : (
+          data.map((row, rowIndex) => (
+            <tr key={row?.ID ?? rowIndex} className="border-b border-gray-800 hover:bg-gray-800/30">
+              {headers.map((h) => (
+                <td key={`${row?.ID ?? rowIndex}-${h}`} className="p-2 whitespace-nowrap">
+                  {String(row?.[h] ?? "").substring(0, 50)}
+                  {String(row?.[h] ?? "").length > 50 ? "..." : ""}
+                </td>
+              ))}
+            </tr>
+          ))
+        )}
+      </tbody>
+    </table>
+  </div>
+)
+
+// --- Tab Content Components ---
+
+const TRUSTClassifierTab = ({ apiMode, apiKey }) => {
+  const [inputData, setInputData] = React.useState("")
+  const [results, setResults] = React.useState(null)
+  const [loading, setLoading] = React.useState(false)
+  const [selectedFile, setSelectedFile] = React.useState(null)
+  const [uploadMode, setUploadMode] = React.useState("text") // "text" or "file"
+
+  const simpleHash = (str: string): number => {
+    let hash = 0
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i)
+      hash = (hash << 5) - hash + char
+      hash = hash & hash // Convert to 32bit integer
+    }
+    return Math.abs(hash)
+  }
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      setInputData(text)
+    } catch (err) {
+      console.error("Paste failed", err)
+      try {
+        document.execCommand("paste")
+      } catch (e) {}
+    }
+  }
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setSelectedFile(file)
+    try {
+      const fileType = file.type
+
+      if (fileType === "application/pdf") {
+        setInputData(
+          `[PDF File: ${file.name}]\n\nNote: PDF text extraction requires server-side processing. Please copy and paste the text content manually, or the system will analyze based on file metadata.\n\nFile Size: ${(file.size / 1024).toFixed(2)} KB`,
+        )
+      } else if (fileType.startsWith("image/")) {
+        setInputData(
+          `[Image File: ${file.name}]\n\nNote: Image text extraction (OCR) requires server-side processing. Please describe the image content or paste any text from the image manually.\n\nFile Type: ${fileType}\nFile Size: ${(file.size / 1024).toFixed(2)} KB`,
+        )
+      } else {
+        // For text files, read the content
+        const text = await file.text()
+        setInputData(text)
+      }
+    } catch (error) {
+      console.error("Error reading file:", error)
+      setInputData(
+        `[File: ${file.name}]\n\nUnable to read file content. File Size: ${(file.size / 1024).toFixed(2)} KB\n\nPlease paste the text content manually.`,
+      )
+    }
+  }
+
+  const handleAnalyze = () => {
+    if (!inputData.trim()) return
+    setLoading(true)
+    setTimeout(() => {
+      setLoading(false)
+
+      const trustKeywords = {
+        triedAndTrue: [
+          "reliability",
+          "resilience",
+          "robust",
+          "failure",
+          "downtime",
+          "availability",
+          "nines",
+          "stress-test",
+          "chaos engineering",
+          "observability",
+          "self-healing",
+          "pre-mortem",
+          "graceful failure",
+          "infant mortality",
+          "wear-out",
+          "bathtub curve",
+          "single point of failure",
+          "fallback",
+          "anomaly detection",
+          "rollback",
+          "instrument",
+          "metrics",
+          "tested",
+          "proven",
+          "reliable",
+          "validated",
+          "verified",
+          "established",
+          "quality",
+          "performance",
+          "uptime",
+          "redundancy",
+          "failover",
+          "monitoring",
+        ],
+        reinforced: [
+          "security",
+          "cybersecurity",
+          "data protection",
+          "encryption",
+          "zero trust",
+          "breach",
+          "vulnerability",
+          "patch",
+          "firewall",
+          "authentication",
+          "MFA",
+          "multifactor",
+          "penetration test",
+          "incident response",
+          "GDPR",
+          "CCPA",
+          "infosec",
+          "network security",
+          "physical security",
+          "ransomware",
+          "hack",
+          "malicious",
+          "threat",
+          "defense",
+          "audit",
+          "least privilege",
+          "secure",
+          "safety",
+          "protection",
+          "safeguard",
+          "monitor",
+          "control",
+          "compliance",
+          "confidentiality",
+          "integrity",
+          "cyber",
+          "attack",
+          "intrusion",
+        ],
+        userCentered: [
+          "accessibility",
+          "inclusion",
+          "diversity",
+          "equity",
+          "friction",
+          "user experience",
+          "inclusive design",
+          "ADA",
+          "Section 508",
+          "co-create",
+          "bias testing",
+          "fairness metrics",
+          "demographic",
+          "underrepresented",
+          "bauhaus",
+          "design thinking",
+          "empathy",
+          "stakeholder",
+          "usability",
+          "accessible",
+          "diverse",
+          "marginalized",
+          "advisory board",
+          "user",
+          "human",
+          "people",
+          "feedback",
+          "centered",
+          "UX",
+          "interface",
+          "interaction",
+          "participatory",
+          "co-design",
+          "universal design",
+        ],
+        sustainable: [
+          "sustainable",
+          "sustainability",
+          "environment",
+          "long-term",
+          "lifecycle",
+          "circular design",
+          "environmental impact",
+          "resource efficiency",
+          "carbon footprint",
+          "waste reduction",
+          "renewable",
+          "ESG",
+          "green",
+          "eco",
+          "climate",
+          "emissions",
+          "energy consumption",
+          "stewardship",
+          "social impact",
+          "governance",
+          "ethical",
+          "responsible",
+          "circular economy",
+          "net zero",
+          "biodiversity",
+          "conservation",
+          "regenerative",
+        ],
+        transparent: [
+          "transparency",
+          "transparent",
+          "explainability",
+          "XAI",
+          "accountability",
+          "audit",
+          "traceability",
+          "black box",
+          "confidence score",
+          "model card",
+          "data sheet",
+          "redress",
+          "right to explanation",
+          "documentation",
+          "openness",
+          "clarity",
+          "process transparency",
+          "decision transparency",
+          "impact transparency",
+          "audit log",
+          "fairness report",
+          "stakeholder engagement",
+          "open",
+          "disclosure",
+          "explainable",
+          "interpretable",
+          "traceable",
+          "verifiable",
+          "auditable",
+          "accountable",
+        ],
+      }
+
+      const inputLower = inputData.toLowerCase()
+      const pillarScores = {
+        triedAndTrue: 0,
+        reinforced: 0,
+        userCentered: 0,
+        sustainable: 0,
+        transparent: 0,
+      }
+      const foundKeywords = new Set()
+
+      Object.entries(trustKeywords).forEach(([pillar, keywords]) => {
+        keywords.forEach((keyword) => {
+          if (inputLower.includes(keyword.toLowerCase())) {
+            pillarScores[pillar]++
+            foundKeywords.add(keyword)
+          }
+        })
+      })
+
+      const totalMatches = Object.values(pillarScores).reduce((sum, score) => sum + score, 0)
+
+      const hash = simpleHash(inputData.trim())
+      const seed1 = (hash % 1000) / 1000
+      const seed2 = ((hash >> 10) % 1000) / 1000
+      const seed3 = ((hash >> 20) % 1000) / 1000
+      const seed4 = ((hash >> 5) % 1000) / 1000
+      const seed5 = ((hash >> 15) % 1000) / 1000
+
+      let rawProbabilities = []
+
+      if (totalMatches === 0) {
+        rawProbabilities = [
+          { pillar: "Unsure", probability: 95, score: 0 },
+          { pillar: "Tried-and-True", probability: 1, score: 0 },
+          { pillar: "Reinforced", probability: 1, score: 0 },
+          { pillar: "User-Centered", probability: 1, score: 0 },
+          { pillar: "Sustainable", probability: 1, score: 0 },
+          { pillar: "Transparent", probability: 1, score: 0 },
+        ]
+      } else {
+        const maxScore = Math.max(...Object.values(pillarScores))
+
+        // Calculate raw probabilities based on keyword matches
+        const triedAndTrueProb =
+          pillarScores.triedAndTrue > 0 ? (pillarScores.triedAndTrue / maxScore) * (seed1 * 20 + 80) : seed1 * 5
+        const reinforcedProb =
+          pillarScores.reinforced > 0 ? (pillarScores.reinforced / maxScore) * (seed2 * 20 + 80) : seed2 * 5
+        const userCenteredProb =
+          pillarScores.userCentered > 0 ? (pillarScores.userCentered / maxScore) * (seed3 * 20 + 80) : seed3 * 5
+        const sustainableProb =
+          pillarScores.sustainable > 0 ? (pillarScores.sustainable / maxScore) * (seed4 * 20 + 80) : seed4 * 5
+        const transparentProb =
+          pillarScores.transparent > 0 ? (pillarScores.transparent / maxScore) * (seed5 * 20 + 80) : seed5 * 5
+
+        // Unsure gets minimal probability when keywords are found
+        const unsureProb = 1
+
+        rawProbabilities = [
+          { pillar: "Tried-and-True", probability: triedAndTrueProb, score: pillarScores.triedAndTrue },
+          { pillar: "Reinforced", probability: reinforcedProb, score: pillarScores.reinforced },
+          { pillar: "User-Centered", probability: userCenteredProb, score: pillarScores.userCentered },
+          { pillar: "Sustainable", probability: sustainableProb, score: pillarScores.sustainable },
+          { pillar: "Transparent", probability: transparentProb, score: pillarScores.transparent },
+          { pillar: "Unsure", probability: unsureProb, score: 0 },
+        ]
+      }
+
+      const totalProb = rawProbabilities.reduce((sum, p) => sum + p.probability, 0)
+      const normalizedPillars = rawProbabilities.map((p) => ({
+        ...p,
+        probability: (p.probability / totalProb) * 100,
+      }))
+
+      const sortedPillars = normalizedPillars.sort((a, b) => b.probability - a.probability)
+      const topThree = sortedPillars.slice(0, 3).map((r, i) => ({ ...r, rank: i + 1 }))
+
+      const isUnsure = totalMatches === 0
+
+      // Use found keywords or indicate no TRUST indicators
+      const keywords =
+        foundKeywords.size > 0 ? Array.from(foundKeywords).slice(0, 8) : ["no TRUST-related keywords detected"]
+
+      setResults({
+        rankings: topThree,
+        isUnsure,
+        keywords,
+        strategies:
+          totalMatches > 0
+            ? [
+                "Content shows alignment with TRUST framework principles.",
+                "Consider strengthening documentation and transparency.",
+                "Implement continuous monitoring and feedback mechanisms.",
+                "Establish clear accountability and governance structures.",
+              ]
+            : [
+                "Content does not appear to be related to TRUST framework.",
+                "No significant TRUST-related keywords or concepts detected.",
+                "Consider whether TRUST principles apply to this context.",
+              ],
+      })
+    }, 1500)
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-3xl font-bold text-blue-400">TRUST Framework Classifier</h2>
+      <p className="text-gray-400">
+        Analyze text, documents, or reports to classify them according to the TRUST framework pillars:
+        <strong className="text-blue-300"> T</strong>ried-and-True, <strong className="text-blue-300">R</strong>
+        einforced,
+        <strong className="text-blue-300"> U</strong>ser-Centered, <strong className="text-blue-300">S</strong>
+        ustainable,
+        <strong className="text-blue-300"> T</strong>ransparent
+      </p>
+
+      <div className="flex gap-2 bg-gray-900 p-2 rounded-lg border border-gray-800 w-fit">
+        <button
+          onClick={() => setUploadMode("text")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            uploadMode === "text" ? "bg-blue-600 text-white" : "text-blue-300 hover:bg-gray-800"
+          }`}
+        >
+          📝 Paste Text
+        </button>
+        <button
+          onClick={() => setUploadMode("file")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            uploadMode === "file" ? "bg-blue-600 text-white" : "text-blue-300 hover:bg-gray-800"
+          }`}
+        >
+          📁 Upload File
+        </button>
+      </div>
+
+      <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 relative">
+        {uploadMode === "text" ? (
+          <>
+            <PasteButton onClick={handlePaste} />
+            <textarea
+              value={inputData}
+              onChange={(e) => setInputData(e.target.value)}
+              placeholder="Paste text, HTML, reports, descriptions..."
+              className="w-full h-32 bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-gray-200 focus:ring-2 focus:ring-indigo-500 transition-all mb-4"
+            />
+          </>
+        ) : (
+          <div className="mb-4">
+            <input
+              type="file"
+              id="trust-file-upload"
+              onChange={handleFileChange}
+              accept=".txt,.pdf,.doc,.docx,.csv,.json,.xml,.html,.md"
+              className="hidden"
+            />
+            <label
+              htmlFor="trust-file-upload"
+              className="cursor-pointer flex flex-col items-center gap-4 border-2 border-dashed border-blue-500/30 rounded-xl p-8 hover:border-blue-500/60 transition-colors"
+            >
+              <div className="w-16 h-16 bg-blue-600/20 rounded-full flex items-center justify-center">
+                <Clipboard size={32} className="text-blue-400" />
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-semibold text-blue-300 mb-1">
+                  {selectedFile ? selectedFile.name : "Click to upload file"}
+                </p>
+                <p className="text-sm text-gray-400">Supports: TXT, PDF, DOC, CSV, JSON, XML, HTML, MD</p>
+              </div>
+            </label>
+            {selectedFile && (
+              <div className="mt-4">
+                <textarea
+                  value={inputData}
+                  onChange={(e) => setInputData(e.target.value)}
+                  placeholder="File content preview..."
+                  className="w-full h-32 bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-gray-200 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            )}
+          </div>
+        )}
+        <button
+          onClick={handleAnalyze}
+          disabled={loading || !inputData.trim() || (apiMode !== "mockup" && !apiKey)}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-all"
+        >
+          {loading ? "Analyzing..." : apiMode !== "mockup" && !apiKey ? "API Key Required" : "🔍 TRUST MATCH - Analyze"}
+        </button>
+      </div>
+      {results && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 space-y-4">
+            <h3 className="text-xl font-semibold text-blue-300">Top 3 Classification Results</h3>
+            {results.rankings.map((item, idx) => (
+              <div
+                key={idx}
+                className={`p-4 rounded-lg ${idx === 0 ? "bg-indigo-600/10 border border-indigo-500/30" : "bg-gray-800/50"}`}
+              >
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-semibold text-lg text-blue-300">
+                    #{item.rank} {item.pillar}
+                  </span>
+                  {/* CHANGE: Fixed percentage display to show 2 decimal places without double multiplication */}
+                  <span className="text-2xl font-bold text-blue-400">{item.probability.toFixed(2)}%</span>
+                </div>
+                <div className="bg-gray-700 rounded-full h-2">
+                  {/* CHANGE: Fixed progress bar width - probability is already a percentage */}
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 rounded-full"
+                    style={{ width: `${item.probability}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 space-y-4">
+            <div>
+              <h3 className="text-xl font-semibold mb-3 text-blue-300">Keywords Found</h3>
+              <div className="flex flex-wrap gap-2">
+                {results.keywords.map((keyword, idx) => (
+                  <span
+                    key={idx}
+                    className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-full text-sm text-indigo-300"
+                  >
+                    {keyword}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h3 className="text-xl font-semibold mb-3 text-blue-300">Strategy Highlights</h3>
+              <ul className="space-y-2">
+                {results.strategies.map((strategy, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-sm text-gray-300">
+                    <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+                    {strategy}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --- KPIs TAB ---
+// KPI Header Component
+const KpiHeader = ({ activeTab, onTabChange }) => {
+  const { config } = useData()
+  const targetComposite = config?.targetComposite ?? initialConfig.targetComposite
+
+  const tabs = [
+    { id: "session1", label: "Composite Score" },
+    { id: "session2", label: "Sector Comparison" },
+    { id: "session3", label: "Time Horizon" },
+    { id: "session4", label: "Early Warning" },
+  ]
+  return (
+    <header className="sticky top-0 z-10 backdrop-blur-md bg-gray-950/80 border-b border-gray-800 p-4 mb-6 -mx-8 -mt-8 px-8 pt-8">
+      {" "}
+      <div className="flex items-center gap-3 mb-3">
+        {" "}
+        <div className="w-9 h-9 rounded-lg bg-indigo-900 grid place-items-center font-bold text-indigo-300 text-sm">
+          RI
+        </div>{" "}
+        <div>
+          {" "}
+          {/* CHANGE: Updated title from "Responsible Innovation — Trust KPI Prototype" to "Building Lasting Impact with KPIs" */}
+          <h1 className="text-xl font-bold m-0 text-gray-100">Building Lasting Impact with KPIs</h1>{" "}
+          <div className="text-gray-500 text-xs mt-1">
+            {" "}
+            Composite Score • Sector Comparison • Time Horizon • Early Warning Alerts{" "}
+          </div>{" "}
+        </div>{" "}
+      </div>{" "}
+      <div className="flex flex-wrap gap-2 my-3">
+        {" "}
+        <div className="text-xs px-3 py-1.5 rounded-full border border-gray-700 bg-gray-800/50 text-gray-400">
+          Composite Target (Green ≥): <span className="font-semibold text-gray-300">{targetComposite}</span> / 100
+        </div>{" "}
+        <div className="text-xs px-3 py-1.5 rounded-full border border-gray-700 bg-gray-800/50 text-gray-400">
+          No Red in Privacy & Fairness
+        </div>{" "}
+        <div className="text-xs px-3 py-1.5 rounded-full border border-gray-700 bg-gray-800/50 text-gray-400">
+          ≤ 1 critical incident / quarter
+        </div>{" "}
+      </div>{" "}
+      <nav className="flex flex-wrap gap-2 mt-3">
+        {" "}
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            className={`px-3 py-2 rounded-lg text-sm transition-colors border ${
+              activeTab === tab.id
+                ? "bg-indigo-700 text-white border-indigo-600 shadow-sm"
+                : "bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-gray-200"
+            }`}
+          >
+            {" "}
+            {tab.label}{" "}
+          </button>
+        ))}{" "}
+      </nav>{" "}
+    </header>
+  )
+}
+
+// KPI Session 1 Component
+const Session1 = ({ acknowledged }) => {
+  // Moved useState calls to the top to comply with linting rules
+  const { config, leaderKPIs, updateConfig, updateWeights } = useData()
+  const initialTarget = config?.targetComposite ?? initialConfig.targetComposite
+  const initialWeights = config?.weights ?? initialConfig.weights
+
+  const [productFilter, setProductFilter] = useState("ALL")
+  const [targetComposite, setTargetComposite] = useState(initialTarget)
+  const [weights, setWeights] = useState({ ...initialWeights })
+  const [showWarning, setShowWarning] = useState(false)
+  const [warningMsg, setWarningMsg] = useState("")
+
+  const pillars = useMemo(() => currentPillarAverages(productFilter), [productFilter])
+  const composite = useMemo(() => computeComposite(pillars, weights), [pillars, weights])
+  const compositeBand = bandClass(composite, config?.bands?.composite?.green, config?.bands?.composite?.amber, true)
+
+  useEffect(() => {
+    if (config?.weights && JSON.stringify(weights) !== JSON.stringify(config.weights)) {
+      setWeights(config.weights)
+    }
+  }, [config?.weights])
+  useEffect(() => {
+    if (config?.targetComposite && targetComposite !== config.targetComposite) {
+      setTargetComposite(config.targetComposite)
+    }
+  }, [config?.targetComposite])
+
+  const autoAdjustWeights = () => {
+    const currentWeights = { ...weights }
+    const vals = Object.values(currentWeights)
+    const sum = vals.reduce((a, b) => (a || 0) + (b || 0), 0)
+
+    if (sum === 100) {
+      setShowWarning(false)
+      if (JSON.stringify(weights) !== JSON.stringify(config.weights)) {
+        updateWeights(currentWeights)
+      }
+      return currentWeights
+    }
+
+    const diff = 100 - sum
+    setWarningMsg(`Sum was ${sum}. Auto-adjusting by ${diff > 0 ? "+" : ""}${diff} distributed proportionally.`)
+    setShowWarning(true)
+    setTimeout(() => setShowWarning(false), 5000)
+
+    let adjustedWeights = {}
+    const numPillars = Object.keys(initialWeights).length
+    if (sum === 0) {
+      const equal = Math.floor(100 / numPillars)
+      const remainder = 100 - equal * numPillars
+      Object.keys(initialWeights).forEach((key, index) => {
+        adjustedWeights[key] = equal + (index === 0 ? remainder : 0)
+      })
+    } else {
+      adjustedWeights = { ...currentWeights }
+      Object.keys(initialWeights).forEach((key) => {
+        const value = currentWeights[key] || 0
+        adjustedWeights[key] = Math.round(value + (value / sum) * diff)
+      })
+      const roundSum = Object.values(adjustedWeights).reduce((a, b) => (a || 0) + (b || 0), 0)
+      const firstKey = Object.keys(initialWeights)[0]
+      if (roundSum !== 100 && firstKey && adjustedWeights[firstKey] !== undefined) {
+        adjustedWeights[firstKey] += 100 - roundSum
+        if (adjustedWeights[firstKey] < 0) adjustedWeights[firstKey] = 0
+      }
+    }
+    Object.keys(adjustedWeights).forEach((key) => {
+      if (adjustedWeights[key] < 0) adjustedWeights[key] = 0
+    })
+    const finalSum = Object.values(adjustedWeights).reduce((a, b) => (a || 0) + (b || 0), 0)
+    const firstKey = Object.keys(initialWeights)[0]
+    if (finalSum !== 100 && firstKey && adjustedWeights[firstKey] !== undefined) {
+      adjustedWeights[firstKey] += 100 - finalSum
+    }
+
+    setWeights(adjustedWeights)
+    updateWeights(adjustedWeights)
+    return adjustedWeights
+  }
+
+  const handleRecalculate = () => {
+    if (!acknowledged) return
+    const adjustedWeights = autoAdjustWeights()
+    updateConfig({
+      targetComposite,
+      bands: { ...config.bands, composite: { ...(config.bands?.composite || {}), green: targetComposite } },
+      weights: adjustedWeights,
+    })
+  }
+
+  const getBandColors = (band) => {
+    switch (band) {
+      case "green":
+        return { bg: "bg-green-500/10", text: "text-green-300", border: "border-green-500/30" }
+      case "amber":
+        return { bg: "bg-yellow-500/10", text: "text-yellow-300", border: "border-yellow-500/30" }
+      default:
+        return { bg: "bg-red-500/10", text: "text-red-300", border: "border-red-500/30" }
+    }
+  }
+  const leaderBandColors = (val, bnds, hib) => getBandColors(bandClass(val, bnds?.green, bnds?.amber, hib))
+
+  const inputStyle =
+    "input-xs bg-gray-800 border-gray-700 rounded p-1 text-gray-100 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+  const selectStyle =
+    "input-sm bg-gray-800 border-gray-700 rounded p-1.5 text-gray-100 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+  const buttonStyle = "px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded shadow"
+
+  return (
+    <div className="grid grid-cols-12 gap-4 text-gray-200">
+      <section className="col-span-12 lg:col-span-6 border border-gray-800 bg-gray-900/50 rounded-xl p-4">
+        <h2 className="text-base font-semibold mb-2 text-gray-100">Composite Trust Score</h2>
+        <div className="flex items-center justify-between gap-4 my-3">
+          <div>
+            <div className="text-5xl font-extrabold leading-none text-white">{composite}</div>
+            <div className="text-xs text-gray-500 mt-1">Out of 100 (weighted sum)</div>
+          </div>
+          <div
+            className={`text-xs px-2 py-1 rounded-full border font-semibold ${getBandColors(compositeBand).bg} ${getBandColors(compositeBand).text} ${getBandColors(compositeBand).border}`}
+          >
+            {compositeBand.toUpperCase()}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          {pillars &&
+            Object.entries(pillars).map(([name, val]) => {
+              const band = bandClass(val, config.bands?.pillar?.green, config.bands?.pillar?.amber, true)
+              const colors = getBandColors(band)
+              return (
+                <div
+                  key={name}
+                  className={`flex items-center justify-between bg-gray-800/50 border border-gray-700 rounded-lg p-2.5`}
+                >
+                  <div className="text-gray-300 text-sm">{name}</div>
+                  <div className="font-bold text-white">
+                    {val ?? "N/A"}{" "}
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}
+                    >
+                      {band.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+        </div>
+        <div className="flex flex-wrap gap-2 mb-3 items-end">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">Target Green ≥</span>
+            <input
+              type="number"
+              min="70"
+              max="95"
+              value={targetComposite}
+              onChange={(e) => setTargetComposite(Number(e.target.value))}
+              className={`${inputStyle} w-20`}
+            />
+          </label>
+          {weights &&
+            Object.entries(weights).map(([key, value]) => (
+              <label key={key} className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500">{key}</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={value ?? 0}
+                  onChange={(e) => setWeights((prev) => ({ ...prev, [key]: Number(e.target.value) }))}
+                  className={`${inputStyle} w-16`}
+                />
+              </label>
+            ))}
+          <button className={buttonStyle} onClick={handleRecalculate}>
+            Recalculate
+          </button>
+        </div>
+        {showWarning && (
+          <div
+            className={`p-3 my-3 rounded-lg text-sm ${getBandColors("amber").bg} ${getBandColors("amber").text} ${getBandColors("amber").border}`}
+          >
+            <strong>⚠️ Weight Adjustment:</strong> {warningMsg}
+          </div>
+        )}
+        <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4 mt-4">
+          <h2 className="text-base font-semibold m-0 mb-2 text-gray-100">Methodology</h2>
+          <div className="text-xs text-gray-500">
+            Composite: <code>Σ(weight/100)×score</code>. Bands: Comp Green ≥ {config.targetComposite}, Amber ≥{" "}
+            {config.bands?.composite?.amber ?? "?"}. Pillars: Green ≥{config.bands?.pillar?.green ?? "?"}, Amber ≥
+            {config.bands?.pillar?.amber ?? "?"}.
+          </div>
+        </div>
+      </section>
+
+      <section className="col-span-12 lg:col-span-6 border border-gray-800 bg-gray-900/50 rounded-xl p-4">
+        <h2 className="text-base font-semibold m-0 mb-2 text-gray-100">Leader KPIs (This Quarter)</h2>
+        <div className="text-xs text-gray-500 mb-3 flex gap-4">
+          <span>
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1.5"></span>Green
+          </span>
+          <span>
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-500 mr-1.5"></span>Amber
+          </span>
+          <span>
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1.5"></span>Red
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          {[
+            ["Crit incidents", leaderKPIs.criticalIncidents, config.bands?.incidents, false],
+            ["MTTD (min)", leaderKPIs.mttdMinutes, config.bands?.mttd, false],
+            ["MTTR (min)", leaderKPIs.mttrMinutes, config.bands?.mttr, false],
+            ["Fairness gap (pp)", leaderKPIs.fairnessGapPct, config.bands?.fairnessGap, false],
+            ["Policy viol /1k", leaderKPIs.hallucinationRatePer1k, config.bands?.hallucination, false],
+            ["Model card pass %", leaderKPIs.modelCardsRedTeamPassPct, config.bands?.cardsPass, true],
+            ["Cust Trust Idx", leaderKPIs.customerTrustIndex, config.bands?.custTrust, true],
+            ["Complaint SLA p90(h)", leaderKPIs.complaintSLAhrsP90, config.bands?.complaintSLA, false],
+            ["Energy kgCO₂e/1k", leaderKPIs.energyKgPer1kInferences, config.bands?.energy, false],
+          ].map(([label, val, bnds, hib]) => {
+            const colors = leaderBandColors(val, bnds, hib)
+            return (
+              <div
+                key={label}
+                className={`flex items-center justify-between bg-gray-800/50 border border-gray-700 rounded-lg p-2.5`}
+              >
+                <div className="text-gray-300 text-sm">{label}</div>
+                <div className="font-bold text-white">
+                  {val ?? "N/A"}{" "}
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}
+                  >
+                    {bandClass(val, bnds?.green, bnds?.amber, hib).toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="col-span-12 border border-gray-800 bg-gray-900/50 rounded-xl p-4">
+        <h2 className="text-base font-semibold m-0 mb-2 text-gray-100">Pillar Heatmap by Product</h2>
+        <div className="mb-3">
+          <label className="flex flex-col gap-1 max-w-[200px]">
+            <span className="text-xs text-gray-500">Product filter</span>
+            <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)} className={selectStyle}>
+              <option value="ALL">All Products</option>
+              <option value="CREDITX">CreditX</option>
+              <option value="SERVEBOT">ServeBot</option>
+              <option value="ESG-LENS">ESG-Lens</option>
+            </select>
+          </label>
+        </div>
+        <div
+          className="grid gap-1.5 items-stretch"
+          style={{ gridTemplateColumns: "180px repeat(6, minmax(60px, 1fr))" }}
+        >
+          <div></div>
+          {["Fairness", "Reliability", "Privacy", "Transparency", "Compliance", "Sustainability"].map((name) => (
+            <div
+              key={name}
+              className="text-xs text-indigo-200 text-center bg-indigo-900/50 p-1.5 rounded border border-gray-700"
+            >
+              {name}
+            </div>
+          ))}
+          {(productFilter === "ALL" ? ["CREDITX", "SERVEBOT", "ESG-LENS"] : [productFilter]).map((pid) => {
+            const productName =
+              pid === "CREDITX"
+                ? "CreditX Underwriting"
+                : pid === "SERVEBOT"
+                  ? "ServeBot LLM Support"
+                  : "ESG-Lens Analytics"
+            return (
+              <React.Fragment key={pid}>
+                <div className="flex items-center justify-start p-2 bg-gray-800/50 text-gray-300 rounded border border-gray-700 text-sm">
+                  {productName}
+                </div>
+                {pillarScores[pid] &&
+                  ["Fairness", "Reliability", "Privacy", "Transparency", "Compliance", "Sustainability"].map(
+                    (pillar) => {
+                      const val = pillarScores[pid][pillar]
+                      const band = bandClass(val, config.bands?.pillar?.green, config.bands?.pillar?.amber, true)
+                      const colors = getBandColors(band)
+                      return (
+                        <div
+                          key={`${pid}-${pillar}`}
+                          className={`grid place-items-center p-2 rounded border font-semibold ${colors.bg} ${colors.text} ${colors.border}`}
+                        >
+                          {val ?? "N/A"}
+                        </div>
+                      )
+                    },
+                  )}
+              </React.Fragment>
+            )
+          })}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+const Session2 = ({ acknowledged }) => {
+  const { config, leaderKPIs, updateLeaderKPIs, updateConfig } = useData()
+
+  const initialOurCompanyData = useMemo(() => {
+    if (!config || !leaderKPIs) return null
+    return {
+      composite: computeComposite(currentPillarAverages("ALL"), config.weights),
+      fairGap: leaderKPIs.fairnessGapPct,
+      energy: leaderKPIs.energyKgPer1kInferences,
+      mttd: leaderKPIs.mttdMinutes,
+      mttr: leaderKPIs.mttrMinutes,
+      trust: leaderKPIs.customerTrustIndex,
+    }
+  }, [config, leaderKPIs])
+
+  const defaultSectorData = useMemo(() => {
+    if (!initialOurCompanyData) return null
+    return {
+      names: ["Acme", "Globex", "Initech", "Umbrella", "Our Company"],
+      composite: [84, 79, 88, 73, initialOurCompanyData.composite],
+      fairGap: [4.8, 6.2, 3.9, 7.5, initialOurCompanyData.fairGap],
+      energy: [2.4, 2.9, 2.2, 3.1, initialOurCompanyData.energy],
+      mttd: [26, 34, 29, 40, initialOurCompanyData.mttd],
+      mttr: [110, 150, 120, 170, initialOurCompanyData.mttr],
+      trust: [86, 81, 90, 74, initialOurCompanyData.trust],
+    }
+  }, [initialOurCompanyData])
+
+  const [sectorData, setSectorData] = useState(() =>
+    defaultSectorData ? JSON.parse(JSON.stringify(defaultSectorData)) : null,
+  )
+  const [companyName, setCompanyName] = useState("")
+  const [companyComposite, setCompanyComposite] = useState("")
+  const [companyFairGap, setCompanyFairGap] = useState("")
+  const [companyMTTD, setCompanyMTTD] = useState("")
+  const [companyMTTR, setCompanyMTTR] = useState("")
+  const [companyTrust, setCompanyTrust] = useState("")
+  const [companyEnergy, setCompanyEnergy] = useState("")
+  const [sliderValues, setSliderValues] = useState(() => ({ ...initialOurCompanyData }))
+
+  useEffect(() => {
+    if (!defaultSectorData || !sliderValues) return
+    setSectorData((prev) => {
+      if (!prev || !prev.names) return JSON.parse(JSON.stringify(defaultSectorData))
+      const newData = JSON.parse(JSON.stringify(prev))
+      const ourIdx = newData.names.indexOf("Our Company")
+      if (ourIdx !== -1) {
+        newData.composite[ourIdx] = sliderValues.composite
+        newData.fairGap[ourIdx] = sliderValues.fairGap
+        newData.mttd[ourIdx] = sliderValues.mttd
+        newData.mttr[ourIdx] = sliderValues.mttr
+        newData.trust[ourIdx] = sliderValues.trust
+        newData.energy[ourIdx] = sliderValues.energy
+      }
+      return newData
+    })
+  }, [sliderValues, defaultSectorData])
+
+  // Now safe to do conditional return after all hooks are called
+  if (!config || !leaderKPIs || !initialOurCompanyData || !defaultSectorData) {
+    return <div className="text-gray-400">Loading KPI data...</div>
+  }
+
+  const handleAddCompany = () => {
+    if (!acknowledged) return
+    if (!companyName.trim()) {
+      console.warn("Enter company name")
+      return
+    }
+    const comp = Number.parseFloat(companyComposite)
+    const fair = Number.parseFloat(companyFairGap)
+    const mttd = Number.parseFloat(companyMTTD)
+    const mttr = Number.parseFloat(companyMTTR)
+    const trust = Number.parseFloat(companyTrust)
+    const energy = Number.parseFloat(companyEnergy)
+    if (isNaN(comp) || isNaN(fair) || isNaN(mttd) || isNaN(mttr) || isNaN(trust) || isNaN(energy)) {
+      console.warn("Fill all fields with valid numbers")
+      return
+    }
+
+    setSectorData((prev) => {
+      if (!prev || !prev.names) return JSON.parse(JSON.stringify(defaultSectorData))
+      const newData = JSON.parse(JSON.stringify(prev))
+      const idx = newData.names.indexOf(companyName)
+      if (idx === -1) {
+        newData.names = [...(newData.names || []), companyName]
+        newData.composite = [...(newData.composite || []), comp]
+        newData.fairGap = [...(newData.fairGap || []), fair]
+        newData.mttd = [...(newData.mttd || []), mttd]
+        newData.mttr = [...(newData.mttr || []), mttr]
+        newData.trust = [...(newData.trust || []), trust]
+        newData.energy = [...(newData.energy || []), energy]
+      } else {
+        if (newData.composite) newData.composite[idx] = comp
+        if (newData.fairGap) newData.fairGap[idx] = fair
+        if (newData.mttd) newData.mttd[idx] = mttd
+        if (newData.mttr) newData.mttr[idx] = mttr
+        if (newData.trust) newData.trust[idx] = trust
+        if (newData.energy) newData.energy[idx] = energy
+      }
+      return newData
+    })
+    setCompanyName("")
+    setCompanyComposite("")
+    setCompanyFairGap("")
+    setCompanyMTTD("")
+    setCompanyMTTR("")
+    setCompanyTrust("")
+    setCompanyEnergy("")
+  }
+
+  const handleResetSector = () => {
+    if (!acknowledged) return
+    setSectorData(JSON.parse(JSON.stringify(defaultSectorData)))
+    setSliderValues({ ...initialOurCompanyData })
+  }
+
+  const chartBaseOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(55, 65, 81, 0.5)" } },
+      y: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(55, 65, 81, 0.5)" }, beginAtZero: false },
+    },
+    plugins: { legend: { labels: { color: "#d1d5db" } }, tooltip: { mode: "index", intersect: false } },
+  }
+
+  const compositeData = {
+    labels: sectorData?.names || [],
+    datasets: [
+      {
+        label: "Composite Score",
+        data: sectorData?.composite || [],
+        backgroundColor: "rgba(99, 102, 241, 0.7)",
+        borderColor: "rgba(99, 102, 241, 1)",
+        borderWidth: 1,
+      },
+    ],
+  }
+
+  const fairEnergyOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(55, 65, 81, 0.5)" } },
+      y: {
+        type: "linear",
+        position: "left",
+        ticks: { color: "#fca5a5" },
+        grid: { color: "rgba(55, 65, 81, 0.5)" },
+        beginAtZero: true,
+        title: { display: true, text: "Fairness Gap (pp)", color: "#fca5a5" },
+      },
+      y1: {
+        type: "linear",
+        position: "right",
+        ticks: { color: "#86efac" },
+        grid: { drawOnChartArea: false },
+        title: { display: true, text: "Energy (kgCO₂e/1k)", color: "#86efac" },
+      },
+    },
+    plugins: { legend: { labels: { color: "#d1d5db" } }, tooltip: { mode: "index", intersect: false } },
+  }
+
+  const fairEnergyData = {
+    labels: sectorData?.names || [],
+    datasets: [
+      {
+        label: "Fairness Gap (pp)",
+        data: sectorData?.fairGap || [],
+        backgroundColor: "rgba(251, 146, 60, 0.7)",
+        borderColor: "rgba(251, 146, 60, 1)",
+        borderWidth: 1,
+        yAxisID: "y",
+      },
+      {
+        label: "Energy (kgCO₂e/1k)",
+        data: sectorData?.energy || [],
+        backgroundColor: "rgba(52, 211, 153, 0.7)",
+        borderColor: "rgba(52, 211, 153, 1)",
+        borderWidth: 1,
+        yAxisID: "y1",
+      },
+    ],
+  }
+
+  const mttData = {
+    labels: sectorData?.names || [],
+    datasets: [
+      {
+        label: "MTTD (min)",
+        data: sectorData?.mttd || [],
+        backgroundColor: "rgba(167, 139, 250, 0.7)",
+        borderColor: "rgba(167, 139, 250, 1)",
+        borderWidth: 1,
+      },
+      {
+        label: "MTTR (min)",
+        data: sectorData?.mttr || [],
+        backgroundColor: "rgba(244, 114, 182, 0.7)",
+        borderColor: "rgba(244, 114, 182, 1)",
+        borderWidth: 1,
+      },
+    ],
+  }
+
+  const trustData = {
+    labels: sectorData?.names || [],
+    datasets: [
+      {
+        label: "Customer Trust Index",
+        data: sectorData?.trust || [],
+        backgroundColor: "rgba(59, 130, 246, 0.7)",
+        borderColor: "rgba(59, 130, 246, 1)",
+        borderWidth: 1,
+      },
+    ],
+  }
+
+  const inputStyle =
+    "input-xs bg-gray-800 border-gray-700 rounded p-1 text-gray-100 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+  const buttonStyle = "px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded shadow"
+  const resetButtonStyle = "px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded shadow"
+
+  if (!sectorData?.names || !sectorData?.composite) {
+    console.error("Sector data is missing or malformed:", sectorData)
+    return <div className="text-red-400">Error loading sector comparison data. Please try resetting.</div>
+  }
+
+  return (
+    <section className="col-span-12 border border-gray-800 bg-gray-900/50 rounded-xl p-4 text-gray-200">
+      <h2 className="text-base font-semibold m-0 mb-2 text-gray-100">Sector Comparison — Cross-Company KPIs</h2>
+      <div className="text-xs text-gray-500 mb-4">
+        Compare multiple anonymous companies in the same sector. Add or adjust values.
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4 items-end">
+        <input
+          type="text"
+          placeholder="Company name"
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          className={`${inputStyle} w-32`}
+        />
+        <input
+          type="number"
+          placeholder="Composite"
+          value={companyComposite}
+          onChange={(e) => setCompanyComposite(e.target.value)}
+          className={`${inputStyle} w-24`}
+        />
+        <input
+          type="number"
+          step="0.1"
+          placeholder="Fair Gap"
+          value={companyFairGap}
+          onChange={(e) => setCompanyFairGap(e.target.value)}
+          className={`${inputStyle} w-24`}
+        />
+        <input
+          type="number"
+          placeholder="MTTD"
+          value={companyMTTD}
+          onChange={(e) => setCompanyMTTD(e.target.value)}
+          className={`${inputStyle} w-20`}
+        />
+        <input
+          type="number"
+          placeholder="MTTR"
+          value={companyMTTR}
+          onChange={(e) => setCompanyMTTR(e.target.value)}
+          className={`${inputStyle} w-20`}
+        />
+        <input
+          type="number"
+          placeholder="Trust"
+          value={companyTrust}
+          onChange={(e) => setCompanyTrust(e.target.value)}
+          className={`${inputStyle} w-20`}
+        />
+        <input
+          type="number"
+          step="0.01"
+          placeholder="Energy"
+          value={companyEnergy}
+          onChange={(e) => setCompanyEnergy(e.target.value)}
+          className={`${inputStyle} w-20`}
+        />
+        <button onClick={handleAddCompany} className={buttonStyle}>
+          Add/Update
+        </button>
+        <button onClick={handleResetSector} className={resetButtonStyle}>
+          Reset Sector
+        </button>
+      </div>
+      <div className="border-t border-gray-700 pt-4 mt-4">
+        <label className="font-semibold text-gray-300 text-sm mb-2 block">
+          Interactive Controls (drag to adjust Our Company):
+        </label>
+        <div className="flex flex-wrap gap-x-6 gap-y-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">Composite ({sliderValues.composite})</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={sliderValues.composite}
+              onChange={(e) => setSliderValues({ ...sliderValues, composite: Number(e.target.value) })}
+              className="w-48 accent-blue-500 h-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">Fairness Gap ({sliderValues.fairGap?.toFixed(1)})</span>
+            <input
+              type="range"
+              min="0"
+              max="15"
+              step="0.1"
+              value={sliderValues.fairGap}
+              onChange={(e) => setSliderValues({ ...sliderValues, fairGap: Number(e.target.value) })}
+              className="w-48 accent-orange-500 h-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">MTTD ({sliderValues.mttd})</span>
+            <input
+              type="range"
+              min="10"
+              max="100"
+              value={sliderValues.mttd}
+              onChange={(e) => setSliderValues({ ...sliderValues, mttd: Number(e.target.value) })}
+              className="w-48 accent-purple-500 h-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">MTTR ({sliderValues.mttr})</span>
+            <input
+              type="range"
+              min="50"
+              max="300"
+              value={sliderValues.mttr}
+              onChange={(e) => setSliderValues({ ...sliderValues, mttr: Number(e.target.value) })}
+              className="w-48 accent-pink-500 h-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">Customer Trust ({sliderValues.trust})</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={sliderValues.trust}
+              onChange={(e) => setSliderValues({ ...sliderValues, trust: Number(e.target.value) })}
+              className="w-48 accent-blue-500 h-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500">Energy ({sliderValues.energy?.toFixed(2)})</span>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              step="0.01"
+              value={sliderValues.energy}
+              onChange={(e) => setSliderValues({ ...sliderValues, energy: Number(e.target.value) })}
+              className="w-48 accent-green-500 h-1.5"
+            />
+          </label>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+        {compositeData.labels?.length > 0 && compositeData.datasets?.[0]?.data?.length > 0 && (
+          <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-2 text-gray-300">Composite Trust (0–100)</h3>
+            <div className="h-64">
+              <Bar data={compositeData} options={chartBaseOptions} />
+            </div>
+          </div>
+        )}
+        {fairEnergyData.labels?.length > 0 &&
+          fairEnergyData.datasets?.[0]?.data?.length > 0 &&
+          fairEnergyData.datasets?.[1]?.data?.length > 0 && (
+            <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-2 text-gray-300">Fairness Gap & Energy</h3>
+              <div className="h-64">
+                <Bar data={fairEnergyData} options={fairEnergyOptions} />
+              </div>
+            </div>
+          )}
+        {mttData.labels?.length > 0 &&
+          mttData.datasets?.[0]?.data?.length > 0 &&
+          mttData.datasets?.[1]?.data?.length > 0 && (
+            <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-2 text-gray-300">MTTD & MTTR (min)</h3>
+              <div className="h-64">
+                <Bar data={mttData} options={chartBaseOptions} />
+              </div>
+            </div>
+          )}
+        {trustData.labels?.length > 0 && trustData.datasets?.[0]?.data?.length > 0 && (
+          <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-2 text-gray-300">Customer Trust Index (0-100)</h3>
+            <div className="h-64">
+              <Bar data={trustData} options={chartBaseOptions} />
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+const Session3 = ({ acknowledged }) => {
+  const { leaderKPIs, updateLeaderKPIs } = useData()
+
+  const [horizon, setHorizon] = useState("medium")
+
+  const [baselineInputs, setBaselineInputs] = useState({
+    fairNow: 3.8,
+    polNow: 4.2,
+    mttdNow: 21,
+    mttrNow: 94,
+    trustNow: 86,
+    slaNow: 14,
+    energyNow: 2.4,
+  })
+
+  const defaultData = useMemo(
+    () => ({
+      incidents: [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      mttd: [35, 30, 28, 26, 25, 24, 23, 22, 22, 22, 22, 21],
+      mttr: [180, 160, 150, 140, 130, 120, 112, 106, 100, 98, 96, 94],
+      fairnessGap: [6.5, 6.0, 5.0, 4.8, 4.5, 4.2, 4.0, 3.9, 3.9, 3.8, 3.8, 3.8],
+      policyViol: [9.0, 8.0, 8.5, 7.5, 7.0, 6.0, 5.5, 5.0, 4.5, 4.4, 4.3, 4.2],
+      custTrust: [78, 79, 80, 81, 82, 83, 84, 85, 85, 86, 86, 86],
+      complaintSLA: [26, 24, 22, 21, 20, 19, 18, 17, 16, 16, 15, 14],
+      energy: [3.6, 3.3, 3.0, 2.9, 2.8, 2.7, 2.6, 2.5, 2.5, 2.5, 2.4, 2.4],
+    }),
+    [],
+  )
+
+  const [timeSeriesData, setTimeSeriesData] = useState(() => {
+    try {
+      return JSON.parse(JSON.stringify(defaultData))
+    } catch {
+      return {}
+    }
+  })
+
+  // Now safe to do conditional return after all hooks are called
+  if (!leaderKPIs) return <div className="text-gray-400">Loading KPI context...</div>
+
+  const getLabelsAndData = () => {
+    const baseLabels = Array.from({ length: 12 }, (_, i) => `W${i + 1}`)
+    let labels = [...baseLabels]
+    let currentData = {}
+    try {
+      currentData = JSON.parse(JSON.stringify(timeSeriesData || {}))
+    } catch (e) {
+      console.error("Failed to parse timeSeriesData", e)
+      currentData = {}
+    }
+
+    const sliceLength = horizon === "short" ? 4 : horizon === "medium" ? 12 : 12
+
+    const ensureArrays = (dataObj) => {
+      const keys = ["incidents", "mttd", "mttr", "fairnessGap", "policyViol", "custTrust", "complaintSLA", "energy"]
+      keys.forEach((key) => {
+        if (!Array.isArray(dataObj[key])) {
+          dataObj[key] = []
+        }
+      })
+      return dataObj
+    }
+
+    currentData = ensureArrays(currentData)
+    const data = JSON.parse(JSON.stringify(currentData))
+
+    if (horizon === "short" || horizon === "medium") {
+      labels = labels.slice(-sliceLength)
+      Object.keys(data).forEach((key) => {
+        if (Array.isArray(data[key])) {
+          data[key] = data[key].slice(-sliceLength)
+        } else {
+          console.warn(`Data key '${key}' is not an array, cannot slice.`)
+          data[key] = []
+        }
+      })
+    } else if (horizon === "long") {
+      const ext = 24
+      for (let i = baseLabels.length + 1; i <= ext; i++) labels.push(`W${i}`)
+
+      const extend = (arr = [], delta, lo, hi) => {
+        const extendedArr = [...arr]
+        while (extendedArr.length < ext) {
+          const last = extendedArr[extendedArr.length - 1] ?? (lo + hi) / 2
+          const jitter = (Math.random() * 2 - 1) * Math.abs(delta) * 0.35
+          extendedArr.push(Math.max(lo, Math.min(hi, last + delta + jitter)))
+        }
+        return extendedArr
+      }
+
+      data.mttd = extend(data.mttd, -1, 18, 120)
+      data.mttr = extend(data.mttr, -2, 60, 300)
+      data.fairnessGap = extend(data.fairnessGap, -0.1, 2.5, 12)
+      data.policyViol = extend(data.policyViol, -0.1, 2, 20)
+      data.custTrust = extend(data.custTrust, 0.3, 65, 95)
+      data.complaintSLA = extend(data.complaintSLA, -0.3, 8, 36)
+      data.energy = extend(data.energy, -0.03, 1.8, 3.6)
+
+      const incidentsExtended = [...(Array.isArray(data.incidents) ? data.incidents : [])]
+      while (incidentsExtended.length < ext) {
+        incidentsExtended.push(Math.random() < 0.18 ? 1 : 0)
+      }
+      data.incidents = incidentsExtended
+    }
+
+    return { labels, data }
+  }
+
+  const handleApplyBaselines = () => {
+    if (!acknowledged) return
+    setTimeSeriesData((prev) => {
+      const newData = JSON.parse(JSON.stringify(prev || {}))
+      const lastIdx = (newData.fairnessGap?.length || 0) - 1
+      if (lastIdx >= 0) {
+        newData.fairnessGap[lastIdx] = baselineInputs.fairNow
+        newData.policyViol[lastIdx] = baselineInputs.polNow
+        newData.mttd[lastIdx] = baselineInputs.mttdNow
+        newData.mttr[lastIdx] = baselineInputs.mttrNow
+        newData.custTrust[lastIdx] = baselineInputs.trustNow
+        newData.complaintSLA[lastIdx] = baselineInputs.slaNow
+        newData.energy[lastIdx] = baselineInputs.energyNow
+      } else {
+        console.error("Cannot apply baselines, time series data is empty.")
+        return prev
+      }
+      return newData
+    })
+    updateLeaderKPIs({
+      fairnessGapPct: baselineInputs.fairNow,
+      hallucinationRatePer1k: baselineInputs.polNow,
+      mttdMinutes: baselineInputs.mttdNow,
+      mttrMinutes: baselineInputs.mttrNow,
+      customerTrustIndex: baselineInputs.trustNow,
+      complaintSLAhrsP90: baselineInputs.slaNow,
+      energyKgPer1kInferences: baselineInputs.energyNow,
+    })
+  }
+
+  const handleSimulateStress = () => {
+    if (!acknowledged) return
+    const stressData = {
+      incidents: [0, 0, 1, 0, 1, 1, 0, 2, 1, 2, 1, 3],
+      mttd: [35, 30, 28, 26, 28, 32, 36, 40, 44, 48, 52, 55],
+      mttr: [180, 160, 150, 140, 145, 155, 165, 180, 195, 210, 230, 250],
+      fairnessGap: [6.5, 6.0, 5.0, 4.8, 5.2, 5.8, 6.4, 7.1, 7.8, 8.3, 8.8, 9.2],
+      policyViol: [9.0, 8.0, 8.5, 7.5, 7.2, 7.8, 8.2, 8.8, 9.1, 9.5, 10.2, 11.0],
+      custTrust: [78, 79, 80, 81, 80, 78, 76, 73, 71, 69, 67, 65],
+      complaintSLA: [26, 24, 22, 21, 22, 24, 26, 28, 30, 32, 35, 38],
+      energy: [3.6, 3.3, 3.0, 2.9, 3.0, 3.1, 3.2, 3.4, 3.5, 3.7, 3.9, 4.1],
+    }
+    setTimeSeriesData(stressData)
+    const lastIdx = (stressData.fairnessGap?.length || 0) - 1
+    if (lastIdx >= 0) {
+      updateLeaderKPIs({
+        criticalIncidents: stressData.incidents[lastIdx],
+        fairnessGapPct: stressData.fairnessGap[lastIdx],
+        hallucinationRatePer1k: stressData.policyViol[lastIdx],
+        mttdMinutes: stressData.mttd[lastIdx],
+        mttrMinutes: stressData.mttr[lastIdx],
+        customerTrustIndex: stressData.custTrust[lastIdx],
+        complaintSLAhrsP90: stressData.complaintSLA[lastIdx],
+        energyKgPer1kInferences: stressData.energy[lastIdx],
+      })
+    }
+  }
+
+  const handleResetBaseline = () => {
+    if (!acknowledged) return
+    const freshDefaultData = JSON.parse(JSON.stringify(defaultData))
+    setTimeSeriesData(freshDefaultData)
+    const lastIdx = (freshDefaultData.fairnessGap?.length || 0) - 1
+    if (lastIdx >= 0) {
+      updateLeaderKPIs({
+        criticalIncidents: freshDefaultData.incidents[lastIdx],
+        fairnessGapPct: freshDefaultData.fairnessGap[lastIdx],
+        hallucinationRatePer1k: freshDefaultData.policyViol[lastIdx],
+        mttdMinutes: freshDefaultData.mttd[lastIdx],
+        mttrMinutes: freshDefaultData.mttr[lastIdx],
+        customerTrustIndex: freshDefaultData.custTrust[lastIdx],
+        complaintSLAhrsP90: freshDefaultData.complaintSLA[lastIdx],
+        energyKgPer1kInferences: freshDefaultData.energy[lastIdx],
+      })
+    }
+  }
+
+  const { labels, data } = getLabelsAndData()
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(55, 65, 81, 0.5)" } },
+      y: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(55, 65, 81, 0.5)" }, beginAtZero: false },
+    },
+    plugins: {
+      legend: { position: "bottom", labels: { color: "#d1d5db" } },
+      tooltip: { mode: "index", intersect: false },
+    },
+    elements: { line: { tension: 0.25 } },
+  }
+
+  const incidentsData = {
+    labels,
+    datasets: [
+      {
+        label: "Crit Incidents",
+        data: data?.incidents || [],
+        borderColor: "rgba(239, 68, 68, 1)",
+        backgroundColor: "rgba(239, 68, 68, 0.1)",
+        borderWidth: 2,
+      },
+      {
+        label: "MTTD (min)",
+        data: data?.mttd || [],
+        borderColor: "rgba(99, 102, 241, 1)",
+        backgroundColor: "rgba(99, 102, 241, 0.1)",
+        borderWidth: 2,
+      },
+      {
+        label: "MTTR (min)",
+        data: data?.mttr || [],
+        borderColor: "rgba(251, 146, 60, 1)",
+        backgroundColor: "rgba(251, 146, 60, 0.1)",
+        borderWidth: 2,
+      },
+    ],
+  }
+
+  const fairnessData = {
+    labels,
+    datasets: [
+      {
+        label: "Fairness gap (pp)",
+        data: data?.fairnessGap || [],
+        borderColor: "rgba(251, 146, 60, 1)",
+        backgroundColor: "rgba(251, 146, 60, 0.1)",
+        borderWidth: 2,
+      },
+      {
+        label: "Policy viol /1k",
+        data: data?.policyViol || [],
+        borderColor: "rgba(167, 139, 250, 1)",
+        backgroundColor: "rgba(167, 139, 250, 0.1)",
+        borderWidth: 2,
+      },
+    ],
+  }
+
+  const trustData = {
+    labels,
+    datasets: [
+      {
+        label: "Customer Trust Idx",
+        data: data?.custTrust || [],
+        borderColor: "rgba(59, 130, 246, 1)",
+        backgroundColor: "rgba(59, 130, 246, 0.1)",
+        borderWidth: 2,
+      },
+      {
+        label: "Complaint SLA p90(h)",
+        data: data?.complaintSLA || [],
+        borderColor: "rgba(234, 179, 8, 1)",
+        backgroundColor: "rgba(234, 179, 8, 0.1)",
+        borderWidth: 2,
+      },
+    ],
+  }
+
+  const energyData = {
+    labels,
+    datasets: [
+      {
+        label: "kgCO₂e/1k inf",
+        data: data?.energy || [],
+        borderColor: "rgba(52, 211, 153, 1)",
+        backgroundColor: "rgba(52, 211, 153, 0.1)",
+        borderWidth: 2,
+      },
+    ],
+  }
+
+  const inputStyle =
+    "input-xs bg-gray-800 border-gray-700 rounded p-1 text-gray-100 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 w-24"
+  const selectStyle =
+    "input-sm bg-gray-800 border-gray-700 rounded p-1.5 text-gray-100 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+  const buttonStyle = "px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded shadow"
+  const buttonWarningStyle = "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded shadow"
+  const buttonResetStyle = "px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded shadow"
+
+  const chartsReady =
+    data?.incidents &&
+    data.mttd &&
+    data.mttr &&
+    data.fairnessGap &&
+    data.policyViol &&
+    data.custTrust &&
+    data.complaintSLA &&
+    data.energy
+
+  return (
+    <section className="col-span-12 border border-gray-800 bg-gray-900/50 rounded-xl p-4 text-gray-200">
+      <h2 className="text-base font-semibold m-0 mb-2 text-gray-100">Trust Over Time Horizon</h2>
+      <div className="text-xs text-gray-500 mb-4">
+        Choose horizon. Use inputs to adjust current baseline or simulate stress test.
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4 items-end">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">Horizon</span>
+          <select value={horizon} onChange={(e) => setHorizon(e.target.value)} className={selectStyle}>
+            <option value="short">Short (4W)</option>
+            <option value="medium">Medium (12W)</option>
+            <option value="long">Long (24W)</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">Fair Gap</span>
+          <input
+            type="number"
+            step="0.1"
+            value={baselineInputs.fairNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, fairNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">Policy Viol</span>
+          <input
+            type="number"
+            step="0.1"
+            value={baselineInputs.polNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, polNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">MTTD</span>
+          <input
+            type="number"
+            value={baselineInputs.mttdNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, mttdNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">MTTR</span>
+          <input
+            type="number"
+            value={baselineInputs.mttrNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, mttrNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">Trust Idx</span>
+          <input
+            type="number"
+            value={baselineInputs.trustNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, trustNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">SLA p90</span>
+          <input
+            type="number"
+            value={baselineInputs.slaNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, slaNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">Energy</span>
+          <input
+            type="number"
+            step="0.01"
+            value={baselineInputs.energyNow}
+            onChange={(e) => setBaselineInputs({ ...baselineInputs, energyNow: Number(e.target.value) })}
+            className={inputStyle}
+          />
+        </label>
+        <button onClick={handleApplyBaselines} className={buttonStyle}>
+          Apply Baselines
+        </button>
+        <button onClick={handleSimulateStress} className={buttonWarningStyle}>
+          Simulate Stress
+        </button>
+        <button onClick={handleResetBaseline} className={buttonResetStyle}>
+          Reset Data
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+        {chartsReady ? (
+          <>
+            <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-2 text-gray-300">Incidents & MTTD/MTTR</h3>
+              <div className="h-64">
+                <Line data={incidentsData} options={chartOptions} />
+              </div>
+            </div>
+            <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-2 text-gray-300">Fairness & Policy Violations</h3>
+              <div className="h-64">
+                <Line data={fairnessData} options={chartOptions} />
+              </div>
+            </div>
+            <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-2 text-gray-300">Trust & SLA</h3>
+              <div className="h-64">
+                <Line data={trustData} options={chartOptions} />
+              </div>
+            </div>
+            <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-2 text-gray-300">Energy Consumption</h3>
+              <div className="h-64">
+                <Line data={energyData} options={chartOptions} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="md:col-span-2 text-center text-gray-500">Loading chart data...</div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+const Session4 = ({ acknowledged }) => {
+  const { config, leaderKPIs } = useData()
+  if (!config || !leaderKPIs) return <div className="text-gray-400">Loading KPI context...</div>
+
+  const pillars = currentPillarAverages("ALL")
+  const composite = computeComposite(pillars, config.weights)
+
+  const metrics = [
+    {
+      name: "Composite Trust Score",
+      value: composite,
+      unit: "/100",
+      higherIsBetter: true,
+      thresholds: config.bands?.alertComposite,
+    },
+    {
+      name: "Critical Incidents",
+      value: leaderKPIs.criticalIncidents,
+      unit: "this Q",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertIncidents,
+    },
+    {
+      name: "MTTD",
+      value: leaderKPIs.mttdMinutes,
+      unit: "min",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertMttd,
+    },
+    {
+      name: "MTTR",
+      value: leaderKPIs.mttrMinutes,
+      unit: "min",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertMttr,
+    },
+    {
+      name: "Fairness Gap",
+      value: leaderKPIs.fairnessGapPct,
+      unit: "pp",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertFairness,
+    },
+    {
+      name: "Policy Violations",
+      value: leaderKPIs.hallucinationRatePer1k,
+      unit: "/1k",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertPolicy,
+    },
+    {
+      name: "Customer Trust Index",
+      value: leaderKPIs.customerTrustIndex,
+      unit: "/100",
+      higherIsBetter: true,
+      thresholds: config.bands?.alertCustTrust,
+    },
+    {
+      name: "Complaint SLA p90",
+      value: leaderKPIs.complaintSLAhrsP90,
+      unit: "hrs",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertSLA,
+    },
+    {
+      name: "Energy / 1k Inferences",
+      value: leaderKPIs.energyKgPer1kInferences,
+      unit: "kgCO₂e",
+      higherIsBetter: false,
+      thresholds: config.bands?.alertEnergy,
+    },
+  ].filter((m) => m.thresholds)
+
+  const shadeCounts = metrics.reduce(
+    (acc, metric) => {
+      const shade = get5Shade(metric.value, metric.thresholds, metric.higherIsBetter)
+      acc[shade]++
+      return acc
+    },
+    { green: 0, lime: 0, amber: 0, orange: 0, red: 0 },
+  )
+
+  const chartData = {
+    labels: ["GREEN", "LIME", "AMBER", "ORANGE", "RED"],
+    datasets: [
+      {
+        data: [shadeCounts.green, shadeCounts.lime, shadeCounts.amber, shadeCounts.orange, shadeCounts.red],
+        backgroundColor: [
+          "rgba(34, 197, 94, 0.7)",
+          "rgba(163, 230, 53, 0.7)",
+          "rgba(245, 158, 11, 0.7)",
+          "rgba(249, 115, 22, 0.7)",
+          "rgba(239, 68, 68, 0.7)",
+        ],
+        borderColor: [
+          "rgba(34, 197, 94, 1)",
+          "rgba(163, 230, 53, 1)",
+          "rgba(245, 158, 11, 1)",
+          "rgba(249, 115, 22, 1)",
+          "rgba(239, 68, 68, 1)",
+        ],
+        borderWidth: 1,
+      },
+    ],
+  }
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(55, 65, 81, 0.5)" } },
+      y: { ticks: { color: "#9ca3af", stepSize: 1 }, grid: { color: "rgba(55, 65, 81, 0.5)" }, beginAtZero: true },
+    },
+    plugins: { legend: { display: false } },
+  }
+
+  return (
+    <section className="col-span-12 border border-gray-800 bg-gray-900/50 rounded-xl p-4 text-gray-200">
+      <h2 className="text-base font-semibold m-0 mb-2 text-gray-100">Early Warning — Dynamic Alerts (5 Shades)</h2>
+      <div className="text-xs text-gray-500 mb-4">
+        Shades based on thresholds and recent trends. Click "Simulate Stress Test" in Session 3 to see changes.
+      </div>
+      <div className="p-3 my-3 rounded-lg text-sm bg-indigo-900/30 border border-indigo-700 text-indigo-200">
+        <strong>💡 Tip:</strong> Use Session 3 controls to see alerts respond to metric changes.
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+        {metrics.map((metric) => {
+          const shade = get5Shade(metric.value, metric.thresholds, metric.higherIsBetter)
+          const colors = getShadeColors(shade)
+          return (
+            <div key={metric.name} className={`border rounded-xl p-4 ${colors.border} ${colors.bg}`}>
+              <div className="flex justify-between items-start mb-2">
+                <div className="text-sm font-semibold text-gray-100">{metric.name}</div>
+                <div
+                  className={`text-xs px-2 py-0.5 rounded-full border font-bold ${colors.border} ${colors.bg} ${colors.text}`}
+                >
+                  {shade.toUpperCase()}
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-white mb-1">
+                {metric.value ?? "N/A"}
+                <span className="text-base font-normal text-gray-400 ml-1">{metric.unit}</span>
+              </div>
+              <div className="text-xs text-gray-500">
+                Target: {metric.higherIsBetter ? "≥" : "≤"} {metric.thresholds?.green ?? "?"}{" "}
+                {metric.unit.startsWith("/") ? "" : metric.unit}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+          <h3 className="text-sm font-semibold mb-2 text-gray-300">Alert Distribution by Shade</h3>
+          <div className="h-64">
+            <Bar data={chartData} options={chartOptions} />
+          </div>
+        </div>
+        <div className="border border-gray-800 bg-gray-900/30 rounded-xl p-4">
+          <h3 className="text-sm font-semibold mb-2 text-gray-300">5-Shade Methodology</h3>
+          <div className="text-xs text-gray-400 space-y-1">
+            <p>The 5-shade system provides granular early warning indicators:</p>
+            <p>
+              <span className="font-semibold text-green-300">GREEN</span> - Optimal performance, exceeds targets
+            </p>
+            <p>
+              <span className="font-semibold text-lime-300">LIME</span> - Good performance, minor variance
+            </p>
+            <p>
+              <span className="font-semibold text-yellow-300">AMBER</span> - Watchlist, early warning signals
+            </p>
+            <p>
+              <span className="font-semibold text-orange-300">ORANGE</span> - Concerning, requires attention
+            </p>
+            <p>
+              <span className="font-semibold text-red-300">RED</span> - Critical, immediate action needed
+            </p>
+            <p className="pt-2 text-gray-500">
+              Each metric has calibrated thresholds. Navigate to Session 3 and click "Simulate Stress Test" to see the
+              alerts respond to deteriorating conditions in real-time.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+const KPIsTab = () => {
+  const [activeKpiTab, setActiveKpiTab] = useState("session1")
+  const acknowledged = true
+
+  const context = useData()
+  if (!context) return <div className="text-gray-400 text-center p-10">Loading KPI Module...</div>
+
+  return (
+    <div className="relative -m-8 -mt-8">
+      <KpiHeader activeTab={activeKpiTab} onTabChange={setActiveKpiTab} />
+      <div className="p-8">
+        {activeKpiTab === "session1" && <Session1 acknowledged={acknowledged} />}
+        {activeKpiTab === "session2" && <Session2 acknowledged={acknowledged} />}
+        {activeKpiTab === "session3" && <Session3 acknowledged={acknowledged} />}
+        {activeKpiTab === "session4" && <Session4 acknowledged={acknowledged} />}
+      </div>
+    </div>
+  )
+}
+
+// --- RI EVALUATION TAB (SPAM) ---
+
+// --- JS ports of Python logic ---
+function mockPredictMessage(text) {
+  if (!text || text.trim() === "") {
+    return ["⚠️ Empty", "0%", "0.0000", "Please enter a message", ""]
+  }
+  const prob = Math.random()
+  const is_spam = prob >= 0.5
+  const label = is_spam ? "SPAM" : "HAM"
+  const label_display = is_spam ? "🚫 SPAM" : "✅ HAM"
+  const confidence = is_spam ? prob : 1 - prob
+  const details = is_spam
+    ? "⚠️ **Warning:** This message appears to be spam"
+    : "✅ **Safe:** This message appears to be legitimate"
+  return [label_display, `${(confidence * 100).toFixed(1)}%`, prob.toFixed(4), details, label]
+}
+function analyzeIndicators(text) {
+  if (!text || text.trim() === "") {
+    return "No text to analyze"
+  }
+  const text_lower = text.toLowerCase()
+  const indicators = []
+  const urgent = ["urgent", "immediate", "act now", "limited time", "hurry", "expire"]
+  const found_urgent = urgent.filter((w) => text_lower.includes(w))
+  if (found_urgent.length > 0) indicators.push(`⚠️ Urgent words: ${found_urgent.join(", ")}`)
+  const money = ["free", "win", "prize", "cash", "claim", "reward", "winner"]
+  const found_money = money.filter((w) => text_lower.includes(w))
+  if (found_money.length > 0) indicators.push(`💰 Money words: ${found_money.join(", ")}`)
+  const action = ["click here", "click now", "verify", "confirm", "call now"]
+  const found_action = action.filter((w) => text_lower.includes(w))
+  if (found_action.length > 0) indicators.push(`👆 Action words: ${found_action.join(", ")}`)
+  if (text === text.toUpperCase() && text.length > 20) indicators.push("🔠 ALL CAPS message")
+  if ((text.match(/!/g) || []).length >= 3)
+    indicators.push(`❗ Multiple exclamation marks (${(text.match(/!/g) || []).length})`)
+  if (text_lower.includes("http") || text_lower.includes("www.")) indicators.push("🔗 Contains URL")
+  if (indicators.length === 0) return "✅ No obvious spam indicators found"
+  return "**Spam Indicators Found:**\n\n" + indicators.join("\n")
+}
+function calculateRIMetrics(validation_log = []) {
+  if (!Array.isArray(validation_log) || validation_log.length === 0) return null
+  const total = validation_log.length
+  const correct = validation_log.filter((v) => v.Correct === "✅ Yes").length
+  const incorrect = total - correct
+  const tp = validation_log.filter((v) => v.Model_Prediction === "SPAM" && v.True_Label === "SPAM").length
+  const tn = validation_log.filter((v) => v.Model_Prediction === "HAM" && v.True_Label === "HAM").length
+  const fp = validation_log.filter((v) => v.Model_Prediction === "SPAM" && v.True_Label === "HAM").length
+  const fn = validation_log.filter((v) => v.Model_Prediction === "HAM" && v.True_Label === "SPAM").length
+  const accuracy = total > 0 ? correct / total : 0
+  const error_rate = total > 0 ? incorrect / total : 0
+  const precision = tp + fp > 0 ? tp / (tp + fp) : 0
+  const recall = tp + fn > 0 ? tp / (tp + fn) : 0
+  const f1 = precision + recall > 0 ? (2 * (precision * recall)) / (precision + recall) : 0
+  return { total, correct, incorrect, accuracy, error_rate, tp, tn, fp, fn, precision, recall, f1 }
+}
+function getRIMetricsReport(metrics, prediction_log_length = 0) {
+  if (metrics === null) {
+    return `## 📊 RI Evaluation Metrics\n\n**Status:** No validations yet\n\n### How to Start:\n1. Use the **"Text Prediction"** or **"File Prediction"** tabs to predict items.\n2. Come here to the **"✅ Validate"** tab.\n3. Select an item, set the TRUE label, and submit.\n4. Metrics will appear here automatically!\n\n---\n\n- Total Predictions Made: ${prediction_log_length}\n- Validations Completed: 0`
+  }
+  return `## 📊 RI Evaluation Metrics\n\n### ✅ Summary\n- **Total Items Validated:** ${metrics.total ?? 0}\n- **Correct Predictions:** ${metrics.correct ?? 0} \n- **Wrong Predictions:** ${metrics.incorrect ?? 0}\n\n---\n\n### 🎯 Performance Scores\n**Accuracy:** ${((metrics.accuracy ?? 0) * 100).toFixed(2)}%\n- Model got ${metrics.correct ?? 0} correct and ${metrics.incorrect ?? 0} wrong out of ${metrics.total ?? 0} validations.\n\n**Error Rate:** ${((metrics.error_rate ?? 0) * 100).toFixed(2)}%\n- Percentage of incorrect predictions.\n\n---\n\n### 📋 Confusion Matrix\n\n| | Predicted HAM | Predicted SPAM |\n|:---|:---:|:---:|\n| **Actually HAM** | ✅ ${metrics.tn ?? 0} (TN) | ❌ ${metrics.fp ?? 0} (FP) |\n| **Actually SPAM** | ❌ ${metrics.fn ?? 0} (FN) | ✅ ${metrics.tp ?? 0} (TP) |\n\n---\n\n### 📈 Detailed Metrics\n\n**Precision:** ${((metrics.precision ?? 0) * 100).toFixed(2)}%\n- When model predicts SPAM, how often is it right?\n\n**Recall:** ${((metrics.recall ?? 0) * 100).toFixed(2)}%\n- What % of actual SPAM is caught?\n\n**F1-Score:** ${((metrics.f1 ?? 0) * 100).toFixed(2)}%\n- Balanced performance measure.`
+}
+// Simple Markdown component
+const MarkdownReport = ({ text = "" }) => {
+  try {
+    let html = text
+      .replace(/^## (.*$)/gim, '<h2 class="text-2xl font-bold mt-4 mb-2">$1</h2>')
+      .replace(/^### (.*$)/gim, '<h3 class="text-xl font-semibold mt-3 mb-1">$1</h3>')
+      .replace(/^. (.*$)/gim, '<li class="ml-5 list-disc">$1</li>') // Changed * to . for example text
+      .replace(/^- (.*$)/gim, '<li class="ml-5 list-disc">$1</li>')
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`(.*?)`/g, '<code class="bg-gray-700 text-sm px-1 rounded">$1</code>')
+      .replace(
+        /^\|:---|:---:|:---:\|/gm,
+        '<thead><tr class="border-b border-gray-700"><th class="p-2 text-left"></th><th class="p-2 text-center">Predicted HAM</th><th class="p-2 text-center">Predicted SPAM</th></tr></thead>',
+      )
+      .replace(
+        /^\| (.*?) \| (.*?) \| (.*?) \|$/gm,
+        (match, p1, p2, p3) =>
+          `<tbody class="border-b border-gray-800"><tr><td class="p-2">${p1.trim()}</td><td class="p-2 text-center">${p2.trim()}</td><td class="p-2 text-center">${p3.trim()}</td></tr></tbody>`,
+      )
+      .replace(/^---$/gm, '<hr class="border-gray-700 my-4"/>')
+      .split("\n\n")
+      .map((p) => `<p>${p.replace(/\n/g, "<br/>")}</p>`)
+      .join("")
+      .replace(/<p><li/g, "<ul><li")
+      .replace(/<\/li><\/p>/g, "</li></ul>")
+      .replace(/<\/ul><br\/><ul>/g, "")
+      .replace(/<\/tbody><tbody[^>]*>/g, "")
+
+    if (html.includes("<thead>")) {
+      html = html.replace(/(<thead>.*?<\/thead>)/, '<table class="w-full my-4 text-sm table-auto">$1')
+      html = html.replace(/(<\/tbody>(?!.*?<\/tbody>))/s, "$1</table>")
+    }
+
+    return (
+      <div
+        className="prose prose-sm prose-invert prose-blue max-w-none"
+        dangerouslySetInnerHTML={{ __html: html.replace(/<br\/?>/g, "<br>") }}
+      />
+    )
+  } catch (error) {
+    console.error("Error rendering markdown:", error, "Input text:", text)
+    return <div className="text-red-400">Error rendering report.</div>
+  }
+}
+// --- Sub-Tab Components ---
+const PredictionSubTab = ({ predictionLog = [], setPredictionLog }) => {
+  const [text, setText] = useState("")
+  const [result, setResult] = useState(null)
+
+  const handlePredict = () => {
+    if (!text.trim()) return
+    try {
+      const [label_display, conf, prob, details, label] = mockPredictMessage(text)
+      const indicators = analyzeIndicators(text)
+      setResult({ label_display, conf, prob, details, indicators })
+
+      const newEntry = {
+        ID: Date.now() + Math.random(),
+        Timestamp: new Date().toISOString().split("T")[0],
+        Message: text,
+        Prediction: label,
+        Confidence: conf,
+        Probability: prob,
+      }
+      setPredictionLog((prev) => [newEntry, ...(Array.isArray(prev) ? prev : [])])
+      setText("")
+    } catch (error) {
+      console.error("Error during prediction:", error)
+      setResult({ error: "Prediction failed. Check console." })
+    }
+  }
+
+  const handleLoadSamples = () => {
+    const sampleMessages = [
+      { text: "Congratulations! You've won a $1000 gift card. Click here to claim now!", isSpam: true },
+      { text: "Hey, want to grab lunch tomorrow at noon?", isSpam: false },
+      { text: "URGENT: Your account has been locked. Verify now or lose access!", isSpam: true },
+      { text: "Meeting rescheduled to 3pm. See you then.", isSpam: false },
+      { text: "FREE MONEY!!! Click now to claim your prize!!!", isSpam: true },
+    ]
+
+    const newEntries = sampleMessages.map((sample, idx) => {
+      const [label_display, conf, prob, details, label] = mockPredictMessage(sample.text)
+      return {
+        ID: Date.now() + Math.random() + idx,
+        Timestamp: new Date().toISOString().split("T")[0],
+        Message: sample.text,
+        Prediction: label,
+        Confidence: conf,
+        Probability: prob,
+      }
+    })
+
+    setPredictionLog((prev) => [...newEntries, ...(Array.isArray(prev) ? prev : [])])
+  }
+
+  const examples = [
+    "Congratulations! You've won a $1000 gift card. Click here to claim now!",
+    "Hey, want to grab lunch tomorrow at noon?",
+    "URGENT: Your account has been locked. Verify now or lose access!",
+    "Meeting rescheduled to 3pm. See you then.",
+  ]
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-xl font-semibold text-blue-300">Enter a message to check if it's spam</h3>
+      {predictionLog.length === 0 && (
+        <div className="bg-blue-950/40 border-2 border-blue-500/60 rounded-lg p-4 flex items-start gap-3">
+          <Info size={20} className="text-blue-400 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-blue-200 mb-2">
+              <strong className="text-blue-300">Getting Started:</strong> No predictions yet. Try the examples below or
+              load sample data to test the dashboard.
+            </p>
+            <button
+              onClick={handleLoadSamples}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              Load Sample Predictions
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2 space-y-4">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Enter message here..."
+            className="w-full h-32 bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-gray-200 focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            onClick={handlePredict}
+            disabled={!text.trim()}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-white font-semibold py-2 rounded-lg"
+          >
+            🔍 Check Message
+          </button>
+          <div className="flex gap-2 flex-wrap">
+            {examples.map((ex, i) => (
+              <button
+                key={i}
+                onClick={() => setText(ex)}
+                className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded"
+              >{`Ex ${i + 1}`}</button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-3">
+          <label className="block text-sm">Prediction</label>
+          <input
+            type="text"
+            readOnly
+            value={result?.label_display || ""}
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-300"
+          />
+          <label className="block text-sm">Confidence</label>
+          <input
+            type="text"
+            readOnly
+            value={result?.conf || ""}
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-300"
+          />
+          <label className="block text-sm">Spam Probability</label>
+          <input
+            type="text"
+            readOnly
+            value={result?.prob || ""}
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-300"
+          />
+        </div>
+      </div>
+      {result?.error && (
+        <div className="text-red-400 p-3 bg-red-900/20 border border-red-500/50 rounded-lg">{result.error}</div>
+      )}
+      {result && !result.error && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <MarkdownReport text={result.details} />
+          </div>
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <MarkdownReport text={result.indicators} />
+          </div>
+        </div>
+      )}
+      <h3 className="text-xl font-semibold pt-4 border-t border-gray-700 text-blue-300">Recent Predictions</h3>
+      {predictionLog.length === 0 ? (
+        <div className="bg-gray-900/50 border border-gray-700 rounded-lg p-8 text-center">
+          <Inbox size={48} className="mx-auto text-gray-600 mb-3" />
+          <p className="text-gray-400 mb-2 font-medium">No predictions yet</p>
+          <p className="text-sm text-gray-500">Make a prediction above to see it logged here</p>
+        </div>
+      ) : (
+        <SimpleTable headers={["ID", "Message", "Prediction", "Confidence"]} data={predictionLog || []} />
+      )}
+    </div>
+  )
+}
+
+const ValidationSubTab = ({ predictionLog = [], validationLog = [], setValidationLog }) => {
+  const [selectedMsgId, setSelectedMsgId] = useState("")
+  const [trueLabel, setTrueLabel] = useState("HAM")
+  const [status, setStatus] = useState("")
+
+  const safePredictionLog = Array.isArray(predictionLog) ? predictionLog : []
+  const safeValidationLog = Array.isArray(validationLog) ? validationLog : []
+
+  const unvalidatedMessages = useMemo(
+    () => safePredictionLog.filter((p) => p && !safeValidationLog.some((v) => v.ID === p.ID)),
+    [safePredictionLog, safeValidationLog],
+  )
+  const selectedPrediction = useMemo(
+    () => safePredictionLog.find((p) => p && p.ID === Number(selectedMsgId)),
+    [selectedMsgId, safePredictionLog],
+  )
+
+  const handleSubmit = () => {
+    if (!selectedMsgId || !selectedPrediction) {
+      setStatus("Please select a message")
+      return
+    }
+    try {
+      const validationEntry = {
+        ID: selectedPrediction.ID,
+        Message: selectedPrediction.Message,
+        Model_Prediction: selectedPrediction.Prediction,
+        True_Label: trueLabel,
+        Correct: selectedPrediction.Prediction === trueLabel ? "✅ Yes" : "❌ No",
+        Timestamp: new Date().toISOString().split("T")[0],
+      }
+
+      setValidationLog((prev) => [
+        validationEntry,
+        ...(Array.isArray(prev) ? prev : []).filter((v) => v.ID !== validationEntry.ID),
+      ])
+      setStatus(`Message #${validationEntry.ID.toString().substring(0, 10)}... validated!`)
+      setSelectedMsgId("")
+      setTrueLabel("HAM")
+    } catch (error) {
+      console.error("Error submitting validation:", error)
+      setStatus("Error submitting validation.")
+    }
+  }
+
+  const metrics = useMemo(() => calculateRIMetrics(safeValidationLog), [safeValidationLog])
+  const metricsReport = useMemo(
+    () => getRIMetricsReport(metrics, safePredictionLog.length),
+    [metrics, safePredictionLog.length],
+  )
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-xl font-semibold text-blue-300">Validate predictions and calculate RI metrics</h3>
+      {safePredictionLog.length === 0 && (
+        <div className="bg-yellow-950/30 border-2 border-yellow-500/60 rounded-lg p-4 flex items-start gap-3">
+          <AlertTriangle size={20} className="text-yellow-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm text-yellow-200">
+              <strong className="text-yellow-300">No Predictions Available:</strong> You need to make predictions first
+              before you can validate them.
+            </p>
+            <p className="text-xs text-yellow-300/80 mt-1">
+              Go to the "Text Prediction" or "File Prediction" tab to create some predictions, then return here to
+              validate them.
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6 space-y-4">
+          <div className="mb-4">
+            <h4 className="font-semibold text-lg text-blue-300 mb-2">Step 1: Select Message</h4>
+            <p className="text-sm text-gray-400 mb-3">
+              Choose a message from your predictions to validate. The <strong className="text-blue-300">#number</strong>{" "}
+              represents the unique ID of each prediction. There are{" "}
+              <strong className="text-blue-300">{unvalidatedMessages.length}</strong> unvalidated messages remaining.
+            </p>
+          </div>
+          <div className="relative">
+            <select
+              value={selectedMsgId}
+              onChange={(e) => {
+                setSelectedMsgId(e.target.value)
+                setStatus("")
+              }}
+              className="w-full appearance-none bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 focus:ring-2 focus:ring-indigo-500 pr-10"
+              disabled={unvalidatedMessages.length === 0}
+            >
+              <option value="">
+                {unvalidatedMessages.length > 0
+                  ? `Select a message (${unvalidatedMessages.length} left)...`
+                  : "No unvalidated messages"}
+              </option>
+              {unvalidatedMessages.map((p) =>
+                p ? <option key={p.ID} value={p.ID}>{`#${p.ID.toString().substring(0, 10)}...`}</option> : null,
+              )}
+            </select>
+            <ChevronDown
+              size={20}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+            />
+          </div>
+          <h4 className="font-semibold text-lg mt-4 text-blue-300">Step 2: Review Details</h4>
+          <textarea
+            readOnly
+            value={selectedPrediction?.Message || ""}
+            placeholder="Message Text..."
+            className="w-full h-24 bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 placeholder:text-gray-500"
+          />
+          <input
+            type="text"
+            readOnly
+            value={selectedPrediction?.Prediction || ""}
+            placeholder="Model Prediction..."
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 placeholder:text-gray-500"
+          />
+        </div>
+        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6 space-y-4">
+          <h4 className="font-semibold text-lg text-blue-300">Step 3: Enter TRUE Answer</h4>
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer text-gray-300">
+              <input
+                type="radio"
+                name="trueLabel"
+                value="SPAM"
+                checked={trueLabel === "SPAM"}
+                onChange={(e) => setTrueLabel(e.target.value)}
+                className="w-4 h-4 accent-indigo-500"
+              />{" "}
+              SPAM
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-gray-300">
+              <input
+                type="radio"
+                name="trueLabel"
+                value="HAM"
+                checked={trueLabel === "HAM"}
+                onChange={(e) => setTrueLabel(e.target.value)}
+                className="w-4 h-4 accent-indigo-500"
+              />{" "}
+              HAM
+            </label>
+          </div>
+          <p className="text-xs text-gray-500/70">
+            - SPAM = Unwanted/malicious
+            <br />- HAM = Legitimate message
+          </p>
+          <button
+            onClick={handleSubmit}
+            disabled={!selectedMsgId}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-white font-semibold py-3 rounded-lg transition-all"
+          >
+            Submit Validation
+          </button>
+          <input
+            type="text"
+            readOnly
+            value={status}
+            placeholder="Status..."
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-300 placeholder:text-gray-500"
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h3 className="text-xl font-semibold mb-4 text-blue-300">Validation History</h3>
+          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
+            {safeValidationLog.length === 0 ? (
+              <div className="text-center py-8">
+                <ListChecks size={48} className="mx-auto text-gray-600 mb-3" />
+                <p className="text-gray-400 mb-2 font-medium">No validations yet</p>
+                <p className="text-sm text-gray-500">Validate predictions above to see them here</p>
+              </div>
+            ) : (
+              <SimpleTable
+                headers={["ID", "Timestamp", "Message", "Model_Prediction", "True_Label", "Correct"]}
+                data={safeValidationLog}
+              />
+            )}
+          </div>
+        </div>
+        <div>
+          <h3 className="text-xl font-semibold mb-4 text-blue-300">RI Metrics</h3>
+          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
+            <MarkdownReport text={metricsReport} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const FilePredictionSubTab = ({ predictionLog = [], setPredictionLog }) => {
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [fileContent, setFileContent] = useState("")
+  const [fileInfo, setFileInfo] = useState(null)
+  const [result, setResult] = useState(null)
+  const [processing, setProcessing] = useState(false)
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setSelectedFile(file)
+    setProcessing(true)
+    setResult(null)
+
+    const fileType = file.type
+    const isBinary =
+      fileType.startsWith("image/") ||
+      fileType === "application/pdf" ||
+      fileType === "application/msword" ||
+      fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    setFileInfo({
+      name: file.name,
+      size: (file.size / 1024).toFixed(2),
+      type: fileType || "unknown",
+      isBinary,
+    })
+
+    try {
+      if (isBinary) {
+        let detailedInfo = `📄 FILE INFORMATION\n${"=".repeat(50)}\n\n`
+        detailedInfo += `File Name: ${file.name}\n`
+        detailedInfo += `File Type: ${fileType || "Unknown"}\n`
+        detailedInfo += `File Size: ${(file.size / 1024).toFixed(2)} KB\n`
+        detailedInfo += `Last Modified: ${new Date(file.lastModified).toLocaleString()}\n\n`
+
+        if (fileType.startsWith("image/")) {
+          detailedInfo += `📷 IMAGE FILE DETECTED\n${"=".repeat(50)}\n\n`
+          detailedInfo += `This appears to be an image file. The spam detection system will:\n`
+          detailedInfo += `• Analyze the file metadata for suspicious patterns\n`
+          detailedInfo += `• Check file size and format for anomalies\n`
+          detailedInfo += `• Evaluate based on common spam image characteristics\n\n`
+          detailedInfo += `Note: Full image content analysis (OCR) requires server-side processing.\n`
+          detailedInfo += `For best results, provide any text content from the image manually.`
+        } else if (fileType === "application/pdf") {
+          detailedInfo += `📑 PDF FILE DETECTED\n${"=".repeat(50)}\n\n`
+          detailedInfo += `This is a PDF document. The spam detection system will:\n`
+          detailedInfo += `• Analyze the file structure and metadata\n`
+          detailedInfo += `• Check for suspicious PDF characteristics\n`
+          detailedInfo += `• Evaluate file size and format patterns\n\n`
+          detailedInfo += `Note: PDF text extraction requires server-side processing.\n`
+          detailedInfo += `For best results, copy and paste the text content manually.`
+        } else {
+          detailedInfo += `📎 BINARY FILE DETECTED\n${"=".repeat(50)}\n\n`
+          detailedInfo += `This is a binary file. The spam detection will analyze:\n`
+          detailedInfo += `• File metadata and properties\n`
+          detailedInfo += `• File size and format patterns\n`
+          detailedInfo += `• Common spam file characteristics`
+        }
+
+        setFileContent(detailedInfo)
+      } else {
+        // For text files, read the content
+        const text = await file.text()
+        setFileContent(text)
+      }
+      setProcessing(false)
+    } catch (error) {
+      console.error("Error reading file:", error)
+      setFileContent(
+        `❌ ERROR READING FILE\n${"=".repeat(50)}\n\nFile: ${file.name}\nSize: ${(file.size / 1024).toFixed(2)} KB\nType: ${fileType}\n\nUnable to read file content. Please try a different file or paste the content manually.`,
+      )
+      setProcessing(false)
+    }
+  }
+
+  const handlePredict = () => {
+    if (!fileContent.trim()) return
+    try {
+      const [label_display, conf, prob, details, label] = mockPredictMessage(fileContent)
+      const indicators = analyzeIndicators(fileContent)
+      setResult({ label_display, conf, prob, details, indicators })
+
+      const newEntry = {
+        ID: Date.now() + Math.random(),
+        Timestamp: new Date().toISOString().split("T")[0],
+        Message: `[FILE: ${selectedFile?.name}] ${fileContent.substring(0, 100)}...`,
+        Prediction: label,
+        Confidence: conf,
+        Probability: prob,
+      }
+      setPredictionLog((prev) => [newEntry, ...(Array.isArray(prev) ? prev : [])])
+    } catch (error) {
+      console.error("Error during prediction:", error)
+      setResult({ error: "Prediction failed. Check console." })
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-xl font-semibold text-blue-300">Upload files to check for spam content</h3>
+
+      <div className="bg-gray-800/50 border-2 border-dashed border-blue-500/30 rounded-xl p-8 text-center">
+        <input
+          type="file"
+          id="file-upload"
+          onChange={handleFileChange}
+          accept=".txt,.pdf,.doc,.docx,.csv,.json,.xml,.html,.md,image/*"
+          className="hidden"
+        />
+        <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
+          <div className="w-16 h-16 bg-blue-600/20 rounded-full flex items-center justify-center">
+            <Clipboard size={32} className="text-blue-400" />
+          </div>
+          <div>
+            <p className="text-lg font-semibold text-blue-300 mb-1">
+              {selectedFile ? selectedFile.name : "Click to upload file"}
+            </p>
+            <p className="text-sm text-gray-400">Supports: TXT, PDF, DOC, CSV, JSON, XML, HTML, MD</p>
+          </div>
+        </label>
+      </div>
+
+      {selectedFile && (
+        <div className="space-y-4">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+            <h4 className="text-sm font-semibold text-blue-300 mb-2">
+              {fileInfo?.isBinary ? "File Information:" : "File Preview:"}
+            </h4>
+            <textarea
+              value={fileContent}
+              onChange={(e) => !fileInfo?.isBinary && setFileContent(e.target.value)}
+              readOnly={fileInfo?.isBinary}
+              className="w-full h-32 bg-black/50 border border-gray-700 rounded-lg p-3 text-gray-200 text-sm font-mono"
+              placeholder="File content will appear here..."
+            />
+          </div>
+
+          <button
+            onClick={handlePredict}
+            disabled={!fileContent.trim() || processing}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white font-semibold py-3 rounded-lg transition-colors"
+          >
+            {processing ? "Processing..." : "🔍 Analyze File Content"}
+          </button>
+        </div>
+      )}
+
+      {result?.error && (
+        <div className="text-red-400 p-3 bg-red-900/20 border border-red-500/50 rounded-lg">{result.error}</div>
+      )}
+
+      {result && !result.error && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <h4 className="text-sm font-semibold text-blue-300 mb-2">Prediction</h4>
+            <p className="text-2xl font-bold text-blue-400">{result.label_display}</p>
+          </div>
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <h4 className="text-sm font-semibold text-blue-300 mb-2">Confidence</h4>
+            <p className="text-2xl font-bold text-blue-400">{result.conf}</p>
+          </div>
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <h4 className="text-sm font-semibold text-blue-300 mb-2">Probability</h4>
+            <p className="text-2xl font-bold text-blue-400">{result.prob}</p>
+          </div>
+        </div>
+      )}
+
+      {result && !result.error && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <h4 className="text-sm font-semibold text-blue-300 mb-3">Analysis Details</h4>
+            <MarkdownReport text={result.details} />
+          </div>
+          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <h4 className="text-sm font-semibold text-blue-300 mb-3">Spam Indicators</h4>
+            <MarkdownReport text={result.indicators} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const StatisticsSubTab = ({ predictionLog = [], validationLog = [] }) => {
+  const safePredictionLog = Array.isArray(predictionLog) ? predictionLog : []
+  const safeValidationLog = Array.isArray(validationLog) ? validationLog : []
+
+  const stats = useMemo(() => {
+    const totalPredictions = safePredictionLog.length
+    const spamCount = safePredictionLog.filter((p) => p.Prediction === "SPAM").length
+    const hamCount = safePredictionLog.filter((p) => p.Prediction === "HAM").length
+    const validatedCount = safeValidationLog.length
+    const metrics = calculateRIMetrics(safeValidationLog)
+
+    return {
+      totalPredictions,
+      spamCount,
+      hamCount,
+      validatedCount,
+      unvalidatedCount: totalPredictions - validatedCount,
+      metrics,
+    }
+  }, [safePredictionLog, safeValidationLog])
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-xl font-semibold text-blue-300">Prediction Statistics & Logs</h3>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+          <p className="text-sm text-blue-300 mb-1">Total Predictions</p>
+          <p className="text-3xl font-bold text-blue-400">{stats.totalPredictions}</p>
+        </div>
+        <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
+          <p className="text-sm text-red-300 mb-1">Spam Detected</p>
+          <p className="text-3xl font-bold text-red-400">{stats.spamCount}</p>
+        </div>
+        <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-4">
+          <p className="text-sm text-green-300 mb-1">Ham Detected</p>
+          <p className="text-3xl font-bold text-green-400">{stats.hamCount}</p>
+        </div>
+        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4">
+          <p className="text-sm text-yellow-300 mb-1">Validated</p>
+          <p className="text-3xl font-bold text-yellow-400">{stats.validatedCount}</p>
+        </div>
+      </div>
+
+      {/* Performance Metrics */}
+      {stats.metrics && (
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
+          <h4 className="text-lg font-semibold text-blue-300 mb-4">Performance Metrics</h4>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <p className="text-sm text-gray-400">Accuracy</p>
+              <p className="text-2xl font-bold text-blue-400">{((stats.metrics.accuracy ?? 0) * 100).toFixed(1)}%</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Precision</p>
+              <p className="text-2xl font-bold text-blue-400">{((stats.metrics.precision ?? 0) * 100).toFixed(1)}%</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Recall</p>
+              <p className="text-2xl font-bold text-blue-400">{((stats.metrics.recall ?? 0) * 100).toFixed(1)}%</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">F1-Score</p>
+              <p className="text-2xl font-bold text-blue-400">{((stats.metrics.f1 ?? 0) * 100).toFixed(1)}%</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prediction Log */}
+      <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
+        <h4 className="text-lg font-semibold text-blue-300 mb-4">Prediction Log</h4>
+        {safePredictionLog.length === 0 ? (
+          <div className="text-center py-8">
+            <Inbox size={48} className="mx-auto text-gray-600 mb-3" />
+            <p className="text-gray-400">No predictions yet</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <SimpleTable
+              headers={["ID", "Timestamp", "Message", "Prediction", "Confidence"]}
+              data={safePredictionLog}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Validation Log */}
+      <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
+        <h4 className="text-lg font-semibold text-blue-300 mb-4">Validation Log</h4>
+        {safeValidationLog.length === 0 ? (
+          <div className="text-center py-8">
+            <ListChecks size={48} className="mx-auto text-gray-600 mb-3" />
+            <p className="text-gray-400">No validations yet</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <SimpleTable
+              headers={["ID", "Timestamp", "Message", "Model_Prediction", "True_Label", "Correct"]}
+              data={safeValidationLog}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const ModelInfoSubTab = () => {
+  return (
+    <div className="space-y-6">
+      <h3 className="text-xl font-semibold text-blue-300">Spam Detection Model Information</h3>
+
+      <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6 space-y-4">
+        <div>
+          <h4 className="text-lg font-semibold text-blue-400 mb-2">Model Overview</h4>
+          <p className="text-gray-300">
+            This spam detection system uses a mock prediction model for demonstration purposes. In a production
+            environment, this would be replaced with a trained machine learning model.
+          </p>
+        </div>
+
+        <div className="border-t border-gray-700 pt-4">
+          <h4 className="text-lg font-semibold text-blue-400 mb-3">Detection Features</h4>
+          <ul className="space-y-2 text-gray-300">
+            <li className="flex items-start gap-2">
+              <CheckCircle size={20} className="text-green-400 mt-0.5 shrink-0" />
+              <span>
+                <strong>Urgent Language:</strong> Detects words like "urgent", "immediate", "act now"
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle size={20} className="text-green-400 mt-0.5 shrink-0" />
+              <span>
+                <strong>Money Keywords:</strong> Identifies "free", "win", "prize", "cash"
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle size={20} className="text-green-400 mt-0.5 shrink-0" />
+              <span>
+                <strong>Action Phrases:</strong> Flags "click here", "verify", "confirm"
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle size={20} className="text-green-400 mt-0.5 shrink-0" />
+              <span>
+                <strong>Formatting Analysis:</strong> Checks for ALL CAPS and excessive punctuation
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle size={20} className="text-green-400 mt-0.5 shrink-0" />
+              <span>
+                <strong>URL Detection:</strong> Identifies suspicious links
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        <div className="border-t border-gray-700 pt-4">
+          <h4 className="text-lg font-semibold text-blue-400 mb-3">Supported File Types</h4>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[".txt", ".pdf", ".doc", ".docx", ".csv", ".json", ".xml", ".html", ".md"].map((type) => (
+              <div key={type} className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-3 text-center">
+                <p className="text-blue-300 font-mono font-semibold">{type}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-gray-700 pt-4">
+          <h4 className="text-lg font-semibold text-blue-400 mb-3">Evaluation Metrics</h4>
+          <div className="space-y-2 text-gray-300">
+            <p>
+              <strong className="text-blue-300">Accuracy:</strong> Percentage of correct predictions
+            </p>
+            <p>
+              <strong className="text-blue-300">Precision:</strong> When model predicts SPAM, how often is it correct?
+            </p>
+            <p>
+              <strong className="text-blue-300">Recall:</strong> What percentage of actual SPAM is caught?
+            </p>
+            <p>
+              <strong className="text-blue-300">F1-Score:</strong> Balanced measure of precision and recall
+            </p>
+          </div>
+        </div>
+
+        <div className="border-t border-gray-700 pt-4">
+          <h4 className="text-lg font-semibold text-blue-400 mb-3">Model Version</h4>
+          <div className="bg-black/50 border border-gray-700 rounded-lg p-4 font-mono text-sm">
+            <p className="text-gray-300">
+              Version: <span className="text-blue-400">1.0.0-demo</span>
+            </p>
+            <p className="text-gray-300">
+              Type: <span className="text-blue-400">Mock Classifier</span>
+            </p>
+            <p className="text-gray-300">
+              Last Updated: <span className="text-blue-400">{new Date().toISOString().split("T")[0]}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const RITriedAndTrueTab = () => {
+  const [predictionLog, setPredictionLog] = useState([])
+  const [validationLog, setValidationLog] = useState([])
+  const [activeNestedTab, setActiveNestedTab] = useState("predict")
+
+  const handleResetMemory = () => {
+    if (window.confirm("Are you sure you want to clear all prediction and validation logs? This cannot be undone.")) {
+      setPredictionLog([])
+      setValidationLog([])
+    }
+  }
+
+  const nestedTabs = [
+    { id: "predict", label: "📝 Text Prediction" },
+    { id: "file", label: "📁 File Prediction" },
+    { id: "validate", label: "✅ Validate" },
+    { id: "stats", label: "📊 Statistics & Log" },
+    { id: "model", label: "ℹ️ Model Info" },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-3xl font-bold text-blue-400">Spam Detection & Evaluation</h2>
+        <button
+          onClick={handleResetMemory}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+        >
+          <AlertTriangle size={18} />
+          Reset Memory
+        </button>
+      </div>
+
+      {/* Nested Tab Navigation */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-2">
+        <div className="flex flex-wrap gap-2">
+          {nestedTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveNestedTab(tab.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeNestedTab === tab.id ? "bg-blue-600 text-white shadow-lg" : "text-blue-300 hover:bg-gray-800"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+        {activeNestedTab === "predict" && (
+          <PredictionSubTab predictionLog={predictionLog} setPredictionLog={setPredictionLog} />
+        )}
+        {activeNestedTab === "file" && (
+          <FilePredictionSubTab predictionLog={predictionLog} setPredictionLog={setPredictionLog} />
+        )}
+        {activeNestedTab === "validate" && (
+          <ValidationSubTab
+            predictionLog={predictionLog}
+            validationLog={validationLog}
+            setValidationLog={setValidationLog}
+          />
+        )}
+        {activeNestedTab === "stats" && (
+          <StatisticsSubTab predictionLog={predictionLog} validationLog={validationLog} />
+        )}
+        {activeNestedTab === "model" && <ModelInfoSubTab />}
+      </div>
+    </div>
+  )
+}
+
+// --- Nines CALCULATOR TAB ---
+const NinesTenXCalculator = () => {
+  const [availability, setAvailability] = useState(99.99)
+  const [errorRate, setErrorRate] = useState(0.01)
+  const [phase, setPhase] = useState("development")
+  const [baseCost, setBaseCost] = useState(1000)
+
+  const phaseMeta = useMemo(
+    () => PHASES.find((p) => p.key === phase) || PHASES.find((p) => p.key === "development") || PHASES[0],
+    [phase],
+  )
+
+  const secondsDown = useMemo(() => availabilityToSecondsDownPerYear(availability), [availability])
+  const nines = useMemo(() => ninesFromAvailability(availability), [availability])
+
+  const estimatedCost = useMemo(() => {
+    const rateFraction = (isNaN(Number(errorRate)) ? 0 : Number(errorRate)) / 100
+    const multiplier = phaseMeta?.multiplier || 0
+    const cost = isNaN(Number(baseCost)) ? 0 : Number(baseCost)
+    if (isNaN(cost) || isNaN(multiplier) || isNaN(rateFraction)) return 0
+    return cost * multiplier * rateFraction
+  }, [errorRate, baseCost, phaseMeta])
+
+  return (
+    <div className="text-gray-200">
+      <h2 className="text-3xl font-bold mb-4">Nines & 10x Cost Multiplier</h2>
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
+          <h3 className="text-xl font-semibold mb-2">Inputs</h3>
+          <div>
+            <label className="block mb-2 text-sm font-medium text-gray-400">Availability (%)</label>
+            <input
+              type="number"
+              step="0.0001"
+              className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 focus:ring-2 focus:ring-indigo-500"
+              value={availability}
+              onChange={(e) => {
+                const val = Number.parseFloat(e.target.value || "0")
+                setAvailability(val)
+                setErrorRate(100 - val)
+              }}
+            />
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium text-gray-400">Error Rate (%)</label>
+            <input
+              type="number"
+              step="0.0001"
+              className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 focus:ring-2 focus:ring-indigo-500"
+              value={errorRate}
+              onChange={(e) => {
+                const val = Number.parseFloat(e.target.value || "0")
+                setErrorRate(val)
+                setAvailability(100 - val)
+              }}
+            />
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium text-gray-400">Detection Phase</label>
+            <div className="relative">
+              <select
+                className="w-full appearance-none bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 focus:ring-2 focus:ring-indigo-500 pr-10"
+                value={phase}
+                onChange={(e) => setPhase(e.target.value)}
+              >
+                {PHASES.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label} ({p.multiplier}x)
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={20}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium text-gray-400">Base Defect Cost ($)</label>
+            <input
+              type="number"
+              step="100"
+              className="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-2.5 text-gray-200 focus:ring-2 focus:ring-indigo-500"
+              value={baseCost}
+              onChange={(e) => setBaseCost(Number.parseFloat(e.target.value || "0"))}
+            />
+          </div>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+          <h3 className="text-xl font-semibold mb-4">Results</h3>
+          <div className="space-y-3 text-lg">
+            <p className="flex justify-between">
+              <span className="text-gray-400">Availability:</span>{" "}
+              <span className="font-mono text-indigo-300">{formatPct(availability)}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-gray-400">Error Rate:</span>{" "}
+              <span className="font-mono text-yellow-300">{formatPct(errorRate)}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-gray-400">Downtime / Year:</span>{" "}
+              <span className="font-mono text-orange-300">{secondsToReadable(secondsDown)}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-gray-400">Nines:</span> <span className="font-mono text-green-300">{nines}</span>
+            </p>
+            <div className="border-t border-gray-700 my-4"></div>
+            <p className="flex justify-between">
+              <span className="text-gray-400">Detection Phase:</span>{" "}
+              <span className="font-medium">{phaseMeta?.label || "N/A"}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-gray-400">Cost Multiplier:</span>{" "}
+              <span className="font-mono text-red-400">{phaseMeta?.multiplier || 0}x</span>
+            </p>
+            <p className="flex justify-between text-xl">
+              <span className="text-gray-300 font-semibold">Estimated Cost:</span>{" "}
+              <span className="font-mono font-bold text-red-300">{formatCurrency(estimatedCost)}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Root Application Component ---
+
+const App = () => {
+  const [acknowledged, setAcknowledged] = React.useState(false)
+  const [apiMode, setApiMode] = React.useState("")
+  const [apiKey, setApiKey] = React.useState("")
+  const [activeTab, setActiveTab] = React.useState("classifier")
+
+  const handleEnter = (selectedApiMode, newApiKey) => {
+    setApiMode(selectedApiMode)
+    setApiKey(newApiKey)
+    setAcknowledged(true)
+    setActiveTab("classifier")
+  }
+
+  if (!acknowledged) {
+    return <WelcomeScreen onEnter={handleEnter} />
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen bg-black text-gray-200 font-sans">
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <main className="flex-1 overflow-hidden">
+        <DataProvider>
+          <div className="h-full overflow-y-auto p-8 bg-black">
+            {activeTab === "classifier" && <TRUSTClassifierTab apiMode={apiMode} apiKey={apiKey} />}
+            {activeTab === "kpis" && <KPIsTab />}
+            {activeTab === "evaluation" && <RITriedAndTrueTab />}
+            {activeTab === "calculator" && <NinesTenXCalculator />}
+          </div>
+        </DataProvider>
+      </main>
+    </div>
+  )
+}
+
+export default App
+
+// Helper functions
+const PHASES = [
+  { key: "concept", label: "Concept", multiplier: 1 },
+  { key: "design", label: "Design", multiplier: 10 },
+  { key: "development", label: "Development", multiplier: 100 },
+  { key: "manufacturing", label: "Manufacturing", multiplier: 1000 },
+  { key: "support", label: "Support", multiplier: 10000 },
+]
+function secondsToReadable(seconds) {
+  const s = Math.max(0, seconds || 0)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  const p = []
+  if (d) p.push(`${d}d`)
+  if (h) p.push(`${h}h`)
+  if (m) p.push(`${m}m`)
+  if (sec || p.length === 0) p.push(`${sec}s`)
+  return p.join(" ")
+}
+function availabilityToSecondsDownPerYear(pct) {
+  const a = Math.min(100, Math.max(0, pct || 0)) / 100
+  return (1 - a) * (365 * 24 * 60 * 60)
+}
+function ninesFromAvailability(pct) {
+  const s = String((pct || 0).toFixed(9))
+  const [l, r = ""] = s.split(".")
+  let c = 0
+  for (const ch of l + r) {
+    if (ch === "9") c++
+    else break
+  }
+  return c
+}
+function formatPct(x) {
+  return `${Math.max(0, Math.min(100, x ?? 0)).toFixed(6)}%`
+}
+function formatCurrency(x) {
+  const u = !isFinite(x) ? "" : Math.abs(x) >= 1e9 ? "B" : Math.abs(x) >= 1e6 ? "M" : Math.abs(x) >= 1e3 ? "K" : ""
+  const s = u === "B" ? x / 1e9 : u === "M" ? x / 1e6 : u === "K" ? x / 1e3 : x
+  return `${s.toFixed(2)}${u}`
+}
