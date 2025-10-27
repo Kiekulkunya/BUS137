@@ -1,0 +1,8 @@
+Equifax Breach (2017)
+Impact: Personal data of 147 million people, including Social Security numbers, birth dates, and addresses, were exposed.
+
+Details: Attackers exploited a known vulnerability in a web application that Equifax had failed to patch.
+
+Aftermath: Equifax faced massive fines and a damaged reputation, highlighting the severe consequences of neglecting software updates.
+
+Lesson Learned: The critical need for timely patch management and system updates to prevent exploitation of known vulnerabilities.

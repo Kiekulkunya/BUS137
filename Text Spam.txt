@@ -1,0 +1,77 @@
+1️⃣
+
+“Hey! Is this John? I think I may have texted the wrong number 😅 but you seem nice.”
+
+2️⃣
+
+“Your FedEx delivery is delayed. Please confirm your address here: http://fedex-check-update.com/track”
+
+3️⃣
+
+“Your security code for Google sign-in is 938512. Don’t share this code with anyone.”
+
+4️⃣
+
+“Congrats! You’ve been selected for a $1000 gift card. Click the link to claim now before it expires!”
+
+5️⃣
+
+“We’ve received your electricity bill payment. Thank you for using MEA e-Payment Service.”
+
+6️⃣
+
+“URGENT! Your bank account will be suspended unless you verify immediately: http://banksecure-login.co”
+
+7️⃣
+
+“Hello customer, you won a free trip to Japan! Please send your passport number to confirm booking.”
+
+8️⃣
+
+“Hi! This is Apple Support. We detected unusual activity on your device. Tap to fix now: http://apple-help.net”
+
+9️⃣
+
+“Your Grab driver, Somchai, has arrived. Tap this link to share your ride status with a friend.”
+
+🔟
+
+“Hey there 👋 just wanted to check if you’re still interested in joining our yoga trial tomorrow at 6PM.”
+
+
+✅ Answer Key: Real vs Fake
+
+1	Wrong-number text (“you seem nice”)	❌ Fake	Classic social-engineering opener (#7 red flag)
+2	Fake FedEx link	❌ Fake	Suspicious URL (#3) + urgency
+3	Google verification code	✅ Real	Simple, direct, no links (#8 safe type)
+4	$1000 gift card offer	❌ Fake	“Free stuff” (#5 red flag)
+5	Electricity bill confirmation	✅ Real	Clear source, no link, familiar context
+6	Fake bank verification link	❌ Fake	Pretends to be a financial institution (#9)
+7	Free trip, asks for passport	❌ Fake	Promises free reward (#5) + asks personal info
+8	Apple “support” link	❌ Fake	Generic greeting + fake domain (#6, #9)
+9	Grab driver notice	✅ Real	Context-specific and matches known service
+10	Yoga class reminder	✅ Real	Natural, non-threatening, opt-out possible
+
+
+
+
+Second USA Trust Bank: Suspicious activity detected on your account. Contact us immediately!
+
+FedUPS: We tried to deliver your package but you weren't home. Call us to reschedule: 303-555-1212
+
+Purchase Confirmation: Xbox system $873.23 delivered Wednesday. Contact us if you have any issues: 303-555-1212
+
+You won the weekly prize of @32,854! Click on this link to claim your prize: sus-link.com
+
+CO Highway Road Toll overdue. $9.75. Click here to pay to avoid penalties. co-tolls-for-real.com
+
+Login detected from East Kigeria, China. If this wasn't you, let us know. recognizable-site-name.com
+
+Amazon is sending you a refunding of $32.64. Please reply with your bank account and routing number to receive your refund.
+
+Your IRS tax refund is pending acceptance. Must accept within 24 hours: http://bit.ly/sdfsdf.
+
+Hi Gary, This is your CEO Alan Braverman. I need your help. Please buy 50 Amazon gift cards for the company holiday party. $100 each.
+
+
+Federal Credit Union ALERT: Your Credit Card has been temporarily LOCKED. Please call Card Services line (786) 319-4482

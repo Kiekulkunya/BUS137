@@ -1,0 +1,229 @@
+Email template (used for all examples)
+
+From:
+To: you@example.com
+
+Subject:
+Date:
+
+Body:
+
+Hi [Name],
+
+[Opening line — short contextual sentence]
+
+[Action / request / info — 1–2 sentences]
+
+[Closing line / signature]
+
+1
+
+From: payroll@yourcompany.com
+
+To: you@example.com
+
+Subject: Payroll Notice — Salary Deposit Confirmed
+Date: 2025-10-22
+
+Body:
+
+Hi Kie,
+
+Your October salary has been successfully deposited to your account ending in 4321. You can view the payslip in your employee portal: https://company-portal.example.com/payslips/Oct2025
+
+If you did not authorize this deposit, reply to HR immediately.
+
+Best regards,
+Payroll Team
+
+2
+
+From: support@fedex-delivery.com
+
+To: you@example.com
+
+Subject: Failed Delivery — Confirm Address Now
+Date: 2025-10-22
+
+Body:
+
+Hi,
+
+We attempted to deliver a package but the address was not complete. Please confirm your address here to reschedule: http://fedex-delivery-check.xyz/confirm
+
+Delivery Team
+
+3
+
+From: security-notice@google.com
+
+To: you@example.com
+
+Subject: Security Code: 938512 (Do not share)
+Date: 2025-10-22
+
+Body:
+
+Hi Kie,
+
+Your Google sign-in verification code is 938512. This code will expire in 10 minutes. If you did not request this, please secure your account at https://accounts.google.com/security
+.
+
+Google Security
+
+4
+
+From: rewards@shopworld.com
+
+To: you@example.com
+
+Subject: Congratulations — $1,000 Reward Waiting
+Date: 2025-10-22
+
+Body:
+
+Hi Winner,
+
+You have been selected at random to receive a $1,000 ShopWorld gift card. Click here to claim within 24 hours: http://shopworld-rewards.claim-now.com
+
+Cheers,
+ShopWorld Rewards
+
+5
+
+From: billing@mea.co.th
+
+To: you@example.com
+
+Subject: Receipt: Electricity Payment Received (Inv #56789)
+Date: 2025-10-22
+
+Body:
+
+Hi Kie,
+
+We have received your electricity payment for account 012345. Invoice #56789 attached. Thank you for using MEA e-Payment Service.
+
+Regards,
+MEA Billing
+
+6
+
+From: alert@bankofasia.com
+
+To: you@example.com
+
+Subject: URGENT: Account Verification Required
+Date: 2025-10-22
+
+Body:
+
+Dear Customer,
+
+We detected suspicious activity on your account. To prevent suspension, verify your details immediately: http://bankofasia-verify-login.com
+
+Thank you,
+Bank of Asia Fraud Dept.
+
+7
+
+From: travel@luckyairlines.com
+
+To: you@example.com
+
+Subject: FREE TRIP to Tokyo — Confirm Passport Details
+Date: 2025-10-22
+
+Body:
+
+Hi,
+
+Congratulations — you’ve been randomly selected for a complimentary trip to Tokyo. Please reply with your full name, passport number and expiry date within 48 hours to confirm your booking.
+
+Lucky Airlines Promotions
+
+8
+
+From: notifications@grab.com
+
+To: you@example.com
+
+Subject: Your driver Somchai is here (Share ETA)
+Date: 2025-10-22
+
+Body:
+
+Hi Kie,
+
+Your Grab driver Somchai has arrived at the pickup location. Use this secure link to share your trip ETA with a friend: https://grab.com/track/AB12345
+
+Safe travels,
+Grab Notifications
+
+9
+
+From: events@localstudio.co
+
+To: you@example.com
+
+Subject: Reminder: Free Yoga Trial — Tomorrow 6:00 PM
+Date: 2025-10-22
+
+Body:
+
+Hi Kie,
+
+Just a reminder — your free yoga trial is scheduled for tomorrow at 6:00 PM. Reply “CANCEL” to opt out or “YES” to confirm. Visit our class page for details: https://localstudio.co/classes
+.
+
+See you soon,
+Local Studio Team
+
+10
+
+From: security@apple.com
+
+To: you@example.com
+
+Subject: Important: Device Compromised — Immediate Action Required
+Date: 2025-10-22
+
+Body:
+
+Hello,
+
+We found evidence of malware on one of your Apple devices. Click the link to run an immediate cleanup and sign in to re-secure your device: http://apple-support-secure.net/fix
+
+Apple Support
+
+✅ Answer Key — Real vs Fake (with red-flag mapping)
+
+Email 1 — Real
+Why: Familiar sender domain that matches company internal portal (assumed), specific account digits and contextual detail; reasonable link to an internal portal (no pressure or unusual requests). (Safe)
+
+Email 2 — Fake
+Why: Suspicious sender domain (fedex-delivery.com vs official FedEx), unknown URL with non-FedEx domain and urgent reschedule request → red flags #2 (phone/identity doesn’t check), #3 (unknown links), #8 (urgency).
+
+Email 3 — Real
+Why: Short verification code with clear, expected format and reputable domain link (accounts.google.com). No request for the user to reply with the code. (Safe)
+
+Email 4 — Fake
+Why: Unsolicited prize, random selection, unknown claim URL — classic “free stuff” lure. (Red flag #5)
+
+Email 5 — Real
+Why: Specific invoice number, recognizable local utility sender, receipt context; no asking for sensitive info or suspicious link. (Safe)
+
+Email 6 — Fake
+Why: Generic “Dear Customer”, threatening suspension, and a non-bank URL. Poses as financial institution to frighten user into action. (Red flags #6 generic greeting, #8 urgency, #9 financial claim)
+
+Email 7 — Fake
+Why: Asks for passport number by reply (sensitive PII) and promises free travel — high-risk and unsolicited. (Red flags #5 free stuff, #7 wrong-number/social-engineer style requests for identity)
+
+Email 8 — Real (assuming the link domain matches Grab’s official domain)
+Why: Context-specific (driver name, trip tracking) and plausible service link. If the URL domain is exactly the official service domain, this is legitimate; always verify domain. (Safe — but check the exact domain string.)
+
+Email 9 — Real
+Why: Local studio reminder, gives clear opt-out (“Reply ‘CANCEL’”), reasonable link to class page. Non-threatening and expected. (Safe)
+
+Email 10 — Fake
+Why: Alarmist language, asks to click an unfamiliar domain to “fix” device — impersonates a major vendor to cause panic. (Red flags #6 generic greeting, #8 urgency, #9 impersonates financial/tech institution)

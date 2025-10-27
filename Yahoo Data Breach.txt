@@ -1,0 +1,8 @@
+Yahoo Data Breach (2013-2016)
+Impact: Over 3 billion user accounts were compromised, making it the largest breach in history.
+
+Details: Hackers exploited vulnerabilities to gain access to Yahoo's databases, stealing names, email addresses, hashed passwords, security questions, and answers.
+
+Aftermath: The breach led to a significant devaluation of Yahoo's sale price to Verizon and numerous lawsuits.
+
+Lesson Learned: The importance of timely breach disclosure and robust encryption methods to protect user data.

@@ -1,0 +1,156 @@
+TRUST cases
+
+World Scandal 
+
+Corporate and financial scandals
+
+Enron scandal: In 2001, the American energy company Enron filed for bankruptcy after it was revealed to have used accounting loopholes to hide its debts. This led to the collapse of its accounting firm, Arthur Andersen. 
+
+Volkswagen "Dieselgate": In 2015, it was discovered that Volkswagen had intentionally programmed its diesel engines to cheat on emissions tests. 
+
+Bernie Madoff's Ponzi scheme: Madoff ran the largest Ponzi scheme in history, defrauding investors of billions of dollars. 
+
+Data and privacy scandals
+Facebook–Cambridge Analytica data scandal: In 2018, it was revealed that Cambridge Analytica had improperly accessed the data of millions of Facebook users for political advertising. 
+
+Media and journalism scandals
+News of the World phone-hacking scandal: In 2011, the British tabloid News of the World was shut down after it was revealed that its journalists had illegally hacked into the voicemails of celebrities and crime victims to obtain stories. 
+
+
+Political scandals
+Watergate scandal: This U.S. political scandal led to the resignation of President Richard Nixon in 1974 after a break-in at the Democratic National Committee headquarters.
+
+Iran-Contra affair: The Reagan administration sold arms to Iran and used the proceeds to fund the Contras in Nicaragua, a scandal that rocked the U.S. in the 1980s. 
+
+
+Data privacy and political influence
+Facebook–Cambridge Analytica scandal: In 2018, it was revealed that a firm called Global Science Research had harvested data from up to 87 million Facebook users without their consent. This data was then sold to Cambridge Analytica, which used it to create targeted political ads, notably in the 2016 US presidential election and the Brexit referendum. 
+
+Cybersecurity and corporate espionage
+
+SolarWinds hack: A 2020 supply chain attack involved hackers inserting malicious code into SolarWinds' Orion IT management software. This allowed them to gain access to the networks of over 18,000 organizations, including government agencies and major corporations. 
+
+Tesla data breach: In 2023, former Tesla employees leaked a large cache of confidential company data, including customer personal information and production secrets. The breach exposed personal data of 75,000 people and could have resulted in a significant fine for Tesla under the GDPR. 
+
+Corporate culture and misconduct
+Uber culture scandal: Allegations of a toxic and sexist "bro culture" at Uber led to numerous complaints, including those of sexual harassment. These issues, combined with other scandals, ultimately resulted in the resignation of CEO Travis Kalanick in 2017. 
+
+Tired-and-test
+
+RadioShack: A long-standing electronics retailer that couldn't compete with online retailers like Amazon and the rise of the smartphone, which replaced many of the niche products they used to sell. 
+
+Compaq: A computer company that was once a leader but struggled to compete in a market that was rapidly evolving and saw the rise of companies like Dell. 
+
+Toys "R" Us: A retail giant that failed to adapt to e-commerce and competition from big-box stores. 
+
+Reinforced
+
+Target: Suffered a massive 2013 data breach that exposed millions of customers' personal information, leading to lawsuits, regulatory fines, and a damaged reputation. 
+
+Netflix: In 2011, the company announced it would split its streaming and DVD-by-mail services into two separate accounts, with different websites, a move that was heavily criticized by customers and led to a significant loss of subscribers. 
+
+Sony: In the mid-2000s, Sony was slow to adapt to the growing popularity of digital music, clinging to its physical CD format despite having the technology for a digital music player that could rival the iPod. 
+
+
+User-Centric
+
+Ford (The Edsel): In the late 1950s, Ford produced the Edsel without adequate market analysis, resulting in a car that did not meet consumer demand and was a commercial failure. 
+
+Netflix: In 2011, Netflix raised prices significantly without a corresponding increase in value for customers, leading to a loss of 800,000 subscribers in one quarter.
+
+Wireless Carriers: Many mobile carriers have a long-standing practice of offering aggressive deals to new customers while providing little beyond the bare minimum to retain existing ones, leading to a lack of loyalty and high customer churn. 
+
+Kodak: A market leader in film photography, Kodak failed to adapt to the digital revolution it had helped to pioneer, ultimately leading to its bankruptcy. 
+
+Blockbuster: The company famously failed to acquire a streaming service (Netflix) early on and did not adapt its business model to the rise of on-demand and streaming entertainment, leading to its decline. 
+
+Ford (The Edsel): In the late 1950s, Ford produced the Edsel without adequate market analysis, resulting in a car that did not meet consumer demand and was a commercial failure. 
+
+Sustain
+
+Rana Plaza collapse: In 2013, this building collapse in Bangladesh, which housed garment factories for major brands, killed over 1,000 workers. It highlighted a catastrophic failure in supply chain oversight, as warnings about the building's integrity were ignored. 
+
+Hostess Brands: Went bankrupt in 2012, partly due to a labor strike after failing to renegotiate labor contracts during a period of economic hardship and rising commodity costs. 
+
+H&M: Faced criticism in 2021 from the Changing Markets Foundation for greenwashing, as many of its sustainability claims were found to be unsubstantiated or misleading. 
+
+Lassonde Entrepreneur Institute: Points out that inefficiency in energy and water use are signs of a lack of sustainability, leading to higher operational costs and negative environmental impact. 
+
+Blockbuster: Failed to transition from physical video rentals to the streaming model, allowing Netflix to dominate the market. 
+
+Kodak: Invented the first digital camera but failed to capitalize on it, clinging to film technology and missing the market shift to digital photography. 
+
+BlackBerry and Nokia: Both companies lost market leadership due to their failure to adapt to the rapid evolution of smartphone technology and app ecosystems. 
+
+
+Transparent 
+
+Wells Fargo: Employees created millions of unauthorized accounts without customer knowledge to meet sales quotas, a secret that was exposed in 2016. This led to a massive loss of customer trust, billions in fines, and lasting damage to the company's reputation. 
+
+Car Manufacturers (General): Some major car companies have lost transparency by engaging in unethical practices like cheating on emissions tests. The lack of openness regarding their manufacturing processes resulted in huge fines, legal penalties, and the erosion of customer and public trust. 
+
+Patagonia: In 2022, the company ceased operations in the Xinjiang region of China due to its inability to verify the absence of forced labor in its supply chain. By not ensuring full transparency from the start, the company found itself in a reactive position where it had to pull out of a region to avoid association with unethical practices. 
+
+
+Examples of Data Breaches
+Several data breaches have made headlines due to their scale and impact. Here are some notable examples:
+
+1. Yahoo Data Breach (2013-2016)
+Impact: Over 3 billion user accounts were compromised, making it the largest breach in history.
+
+Details: Hackers exploited vulnerabilities to gain access to Yahoo's databases, stealing names, email addresses, hashed passwords, security questions, and answers.
+
+Aftermath: The breach led to a significant devaluation of Yahoo's sale price to Verizon and numerous lawsuits.
+
+Lesson Learned: The importance of timely breach disclosure and robust encryption methods to protect user data.
+
+2. Equifax Breach (2017)
+Impact: Personal data of 147 million people, including Social Security numbers, birth dates, and addresses, were exposed.
+
+Details: Attackers exploited a known vulnerability in a web application that Equifax had failed to patch.
+
+Aftermath: Equifax faced massive fines and a damaged reputation, highlighting the severe consequences of neglecting software updates.
+
+Lesson Learned: The critical need for timely patch management and system updates to prevent exploitation of known vulnerabilities.
+
+3. Facebook Data Leak (2019)
+Impact: Data of 533 million users, including phone numbers and personal details, were exposed online.
+
+Details: The breach resulted from data scraping due to a vulnerability in Facebook’s platform that allowed unauthorized access to user profiles.
+
+Aftermath: Raised significant privacy concerns and led to scrutiny over Facebook's data security practices.
+
+Lesson Learned: The necessity of securing APIs and limiting data access to prevent large-scale data scraping.
+
+4. First American Financial Corporation (2019)
+Impact: 885 million sensitive financial and personal records were exposed due to a website design flaw.
+
+Details: A vulnerability allowed unauthorized users to access documents containing bank account numbers, statements, mortgage records, Social Security numbers, and wire transaction receipts.
+
+Aftermath: Prompted investigations and highlighted risks associated with improper web security design.
+
+Lesson Learned: The importance of regular security assessments and safeguarding web applications against common vulnerabilities.
+
+5. Marriott International Breach (2018)
+Impact: Roughly 383 million guest records were exposed, including passport numbers and payment card details.
+
+Details: The breach originated from the Starwood reservation system acquired by Marriott, which had been compromised since 2014.
+
+Aftermath: Marriott faced fines and had to upgrade its security measures significantly.
+
+Lesson Learned: Due diligence during mergers and acquisitions is crucial to identify and rectify existing security issues.
+
+Why Do Data Breaches Keep Happening?
+Data breaches continue to occur due to a combination of factors:
+
+Increasing Sophistication of Cyberattacks: Attackers are constantly developing new methods to bypass security measures, utilizing advanced techniques like AI-driven phishing and zero-day exploits.
+
+Human Error and Insider Threats: Employees may unintentionally expose data through negligent actions or may act maliciously due to various motivations.
+
+Expanded Attack Surface: The rise of remote work and cloud services has expanded the potential entry points for attackers. Employees accessing sensitive data from unsecured networks or personal devices increase the risk.
+
+Value of Data on the Dark Web: Stolen data is highly valuable on black markets, incentivizing cybercriminals to target organizations with rich data stores.
+
+Inadequate Security Measures: Some organizations fail to keep up with evolving security threats, neglecting updates, and not investing sufficiently in cybersecurity infrastructure and training.
+
+
